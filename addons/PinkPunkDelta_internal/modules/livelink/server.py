@@ -39,6 +39,7 @@ class LinkServer:
         self.psd_files = {}             # full name -> path
         self.staging = tempfile.mkdtemp(prefix="ppd_livelink_")
         self.httpd = None
+        self.requests = []              # the last uploads, for debugging (no key in it)
 
     def start(self):
         server = self
@@ -254,7 +255,7 @@ class _Handler(BaseHTTPRequestHandler):
             n = self.headers.get("Content-Length", "")
             read(int(n) if n.isdigit() else 0)
         if not data:
-            raise ValueError("Nothing arrived: in the Shortcut, the file must be Shortcut Input")
+            raise ValueError("The iPad sent an empty file. Use Send back on the LiveLink page")
         return data
 
     def do_POST(self):
@@ -263,9 +264,14 @@ class _Handler(BaseHTTPRequestHandler):
         if self.route != "/upload":
             self._send(404, "Not found")
             return
+        note = {k: self.headers.get(k, "") for k in (
+            "User-Agent", "Content-Type", "Content-Length", "Transfer-Encoding", "Expect")}
+        self.link.requests = self.link.requests[-9:] + [note]
         try:
             data = self._body()
+            note["received"] = len(data)
         except ValueError as e:
+            note["error"] = str(e)
             self.close_connection = True
             self._send(400, f"⚠ {e}")
             return
@@ -276,6 +282,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         msgs = []
         for stem, ext, body in files:
+            note["file"] = stem + ext
+            if ext == ".psd" and self.query.get("object"):
+                stem = self.query["object"]     # Send back beside that object on the page
             try:
                 msgs.append(self.link.receive(stem, ext, body))
             except Exception as e:

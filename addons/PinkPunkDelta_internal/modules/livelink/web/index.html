@@ -14,6 +14,8 @@
   h2 { font-size:17px; margin:0 0 8px; }
   .row { display:flex; gap:10px; align-items:center; padding:10px 0; border-top:1px solid #383340; flex-wrap:wrap; }
   .name { flex:1; min-width:160px; word-break:break-word; }
+  .bar { height:6px; background:#383340; border-radius:3px; overflow:hidden; width:100%; }
+  .bar div { height:100%; width:0; background:#ff4fa3; }
   a.btn, button { background:#ff4fa3; color:#17151a; border:0; border-radius:8px; padding:10px 14px; font:600 15px inherit; text-decoration:none; }
   input[readonly] { width:100%; box-sizing:border-box; background:#111; color:#eee; border:1px solid #383340; border-radius:8px; padding:10px; margin:6px 0; }
   li { margin:7px 0; } pre { white-space:pre-wrap; color:#a49fa9; font-size:13px; margin:0; }
@@ -28,6 +30,13 @@
     <h2>Procreate files</h2>
     <div class="dim">Tap Get PSD, then open the download with Procreate. Paint on <b>SHD</b> and <b>TEX</b>. More layers: group them and name the group SHD or TEX.</div>
     <div id="objects"></div>
+  </section>
+  <section>
+    <h2>Send back</h2>
+    <div class="dim">In Procreate: Actions → Share → <b>PSD</b> → <b>Save to Files</b>. Then tap <b>Send back</b> beside its object above and pick that PSD. Keep this page open until it says it arrived.</div>
+    <p id="sendmsg"></p>
+    <div class="bar" id="bar" hidden><div></div></div>
+    <input type="file" id="file" hidden>
   </section>
   <section>
     <details>
@@ -49,7 +58,25 @@ const t = new URLSearchParams(location.search).get('t') || '';
 const q = '?t=' + encodeURIComponent(t);
 $('url').value = location.origin + '/upload' + q;
 $('copy').onclick = () => { $('url').focus(); $('url').setSelectionRange(0, 9999); document.execCommand('copy'); };
-let last = '';
+let last = '', target = '', sending = false;
+$('file').onchange = () => {
+  const f = $('file').files[0];
+  if (!f) return;
+  const say = m => { $('sendmsg').textContent = m; };
+  if (!/\.psd$/i.test(f.name)) { say('Pick a PSD file (this is ' + f.name + ').'); return; }
+  if (!f.size) { say('This PSD is empty (0 MB). Save it to Files again.'); return; }
+  const mb = Math.round(f.size / 1e6), x = new XMLHttpRequest();
+  sending = true; $('bar').hidden = false;
+  x.open('POST', '/upload' + q + '&object=' + encodeURIComponent(target) + '&name=' + encodeURIComponent(f.name));
+  x.upload.onprogress = e => {
+    const p = e.loaded / f.size; $('bar').firstElementChild.style.width = 100 * p + '%';
+    say(p < 1 ? 'Sending ' + f.name + ' to ' + target + ': ' + Math.round(100 * p) + ' % of ' + mb + ' MB' : 'Arrived. Blender is writing the textures…');
+  };
+  x.onload = () => { sending = false; $('bar').hidden = true; say(x.responseText); };
+  x.onerror = () => { sending = false; $('bar').hidden = true; say('The connection broke. Is LiveLink still running in Blender? Send it again.'); };
+  x.setRequestHeader('Content-Type', 'application/octet-stream');
+  x.send(f);
+};
 async function refresh() {
   try {
     const text = await (await fetch('/state' + q, {cache:'no-store'})).text();
@@ -69,6 +96,10 @@ async function refresh() {
       } else {
         const d = document.createElement('div'); d.className = 'dim'; d.textContent = 'Prepare PSD in Blender'; row.append(d);
       }
+      const b = document.createElement('button');
+      b.textContent = 'Send back';
+      b.onclick = () => { if (sending) return; target = o.name; $('file').value = ''; $('file').click(); };
+      row.append(b);
       return row;
     }));
     $('log').textContent = s.log.join('\n') || '—';

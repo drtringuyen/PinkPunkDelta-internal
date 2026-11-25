@@ -195,8 +195,12 @@ def run():
     r = call(url + "/upload?t=testtoken", stream(), {"Content-Type": "application/octet-stream"})
     ok(r["code"] == 200 and core.inbox[0]["stem"] == "Untitled", "streamed upload")
     core.drop(core.inbox[0])
+    r = call(url + "/upload?t=testtoken&object=VHC_Test.Wheel&name=Anything%20(1).psd", body,
+             {"Content-Type": "application/octet-stream"})
+    ok(b"VHC_Test.Wheel: SHD" in r["body"] and not core.inbox, "Send back goes to its object")
+    ok(core.server.requests[-1]["received"] == len(body), "upload is noted")
     r = call(url + "/upload?t=testtoken", b"")
-    ok(r["code"] == 400 and b"Nothing arrived" in r["body"], "empty upload is named")
+    ok(r["code"] == 400 and b"empty file" in r["body"], "empty upload is named")
     call(url + "/upload?t=testtoken", *form("Untitled Artwork.psd", body))
     bpy.ops.ppd.inbox_assign(item_id=core.inbox[0]["id"], object_name=low.name)
     ok(not core.inbox and core.find_object("Untitled_Artwork") == low, "and is remembered")
