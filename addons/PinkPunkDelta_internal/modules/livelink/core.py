@@ -21,7 +21,7 @@ WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 
 server = None
 watcher = None
-watch_folders = watch.folders      # the tests put their own here
+watch_folder = watch.folder        # the tests put their own here
 inbox = []              # dicts: id, stem, psd, files {kind or '': path}
 log_lines = collections.deque(maxlen=30)
 _last = 0.0
@@ -135,7 +135,6 @@ def publish():
     for n in taken:             # two objects answer to it: neither does
         del names[n]
     server.names = names
-    server.blend = bpy.data.filepath
     for o in sorted(idn.objects(), key=lambda o: o.name):
         p = idn.psd_path(o)
         ready = bool(bpy.data.filepath) and os.path.isfile(p)
@@ -191,7 +190,7 @@ def start():
     publish()
     record = os.path.join(bpy.utils.user_resource('CONFIG', create=True), "ppd_watch.json")
     watcher = watch.Watcher(s, lambda n: s.names.get(norm(n), ""), log, record,
-                            lambda blend: watch_folders(blend))
+                            lambda: watch_folder())
     watcher.start()
     if not bpy.app.timers.is_registered(tick):
         bpy.app.timers.register(tick, first_interval=0.1, persistent=True)

@@ -19,14 +19,14 @@ import PinkPunkDelta_internal as addon          # noqa: E402
 addon.register()
 from PinkPunkDelta_internal import identity as idn, links, material     # noqa: E402
 from PinkPunkDelta_internal.modules.bakenlink import bake               # noqa: E402
-from PinkPunkDelta_internal.modules.livelink import core, prepare, psd, qr, watch  # noqa: E402
+from PinkPunkDelta_internal.modules.livelink import core, prepare, psd, qr  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix="ppd_test_")
 core.token = lambda: "testtoken"
 core.PORT = 8799
-drive = os.path.join(tmp, "My Drive", "PPD_Procreate")
+drive = os.path.join(tmp, "PPD_Procreate")
 os.makedirs(drive)
-core.watch_folders = lambda blend: [drive]
+core.watch_folder = lambda: drive
 bpy.utils.user_resource = lambda *a, **k: tmp        # its record stays in the temp folder
 
 
@@ -211,7 +211,6 @@ def run():
     names(low)
 
     print("watched folder")
-    ok(watch.drive_root("D:/ggdrive/.shortcut-targets-by-id/x/a.blend") == "D:/ggdrive", "Drive root")
 
     def wait(cond, sec=40):
         end = time.time() + sec
@@ -227,9 +226,20 @@ def run():
             f.write(body)
         ok(wait(lambda: os.path.getmtime(shd_file) != before), name + " is imported")
         ok(wait(lambda: len(core.watcher.done) > 0 and any(name in k for k in core.watcher.done)), "and noted")
+        ok(wait(lambda: not os.path.exists(os.path.join(drive, name))), "and removed")
     with open(os.path.join(drive, "VHC_Test.Nobody.psd"), "wb") as f:
         f.write(body)
     ok(wait(lambda: any("Nobody" in x for x in core.log_lines)), "a stranger is left alone")
+    ok(os.path.isfile(os.path.join(drive, "VHC_Test.Nobody.psd")), "and kept")
+    name = os.path.join(drive, "VHC_Test.Wheel.psd")    # imported, but could not be removed
+    with open(name, "wb") as f:
+        f.write(body)
+    held = open(name, "rb")
+    before = os.path.getmtime(shd_file)
+    ok(wait(lambda: os.path.getmtime(shd_file) != before), "imported while it is held open")
+    wait(lambda: False, 6)
+    held.close()
+    ok(os.path.isfile(name), "a file in use stays")
     before = os.path.getmtime(shd_file)
     core.stop()
     core.start()

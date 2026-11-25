@@ -1,38 +1,22 @@
-"""Watches the PPD_Procreate folder in Google Drive: a PSD saved there from Procreate (Share >
-PSD > Save to Files) is imported like an upload. Runs in a thread and never touches bpy."""
-import glob
+"""Watches the PPD_Procreate folder of this PC: a PSD the iPad saves there (Procreate: Share > PSD >
+Save to Files) is imported like an upload and then removed - the artwork stays in Procreate.
+Runs in a thread and never touches bpy."""
 import json
 import os
 import re
-import string
 import threading
-import time
 
 FOLDER = "PPD_Procreate"
 EVERY = 3.0             # seconds between looks at the folder
-FIND_EVERY = 20.0       # seconds between looks for the folder itself
 TRIES = 5
 
 
-def drive_root(blend):
-    """The Drive mount a .blend lies in ('' = none): what is above My Drive, Shared drives or
-    the hidden folder of shortcuts."""
-    m = re.match(r"(.+?)[\\/](\.shortcut-targets-by-id|My Drive|Shared drives)[\\/]", blend)
-    return m.group(1) if m else ""
-
-
-def folders(blend=""):
-    """Every <drive>/My Drive/PPD_Procreate (My Drive has other names in other languages)."""
-    roots = [f"{c}:\\" for c in string.ascii_uppercase if os.path.isdir(f"{c}:\\")]
-    root = drive_root(blend)
-    if root:
-        roots.insert(0, root)
-    out = []
-    for r in roots:
-        for p in glob.glob(os.path.join(glob.escape(r), "*", FOLDER)):
-            if os.path.isdir(p) and not any(os.path.samefile(p, q) for q in out):
-                out.append(p)
-    return out
+def folder():
+    """The fixed folder on this PC, made when missing. Shared on the network, so the iPad saves
+    straight into it."""
+    path = os.path.join(os.environ.get("SystemDrive", os.path.expanduser("~")) + os.sep, FOLDER)
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def names_of(stem):
@@ -44,12 +28,12 @@ def names_of(stem):
 
 
 class Watcher:
-    def __init__(self, link, find, log, record, where=folders):
+    def __init__(self, link, find, log, record, where=folder):
         """link: the LinkServer. find(name) -> the object's full name or ''. record: the json
         file that remembers what was imported, so nothing is imported twice."""
         self.link, self.find, self.log = link, find, log
         self.record, self.where = record, where
-        self.paths = []
+        self.path = ""
         self.seen = {}          # path -> stamp at the last look: imported once it is still
         self.tries = {}
         self.told = set()
@@ -67,15 +51,10 @@ class Watcher:
         self.quit.set()
 
     def _run(self):
-        found = 0.0
         while not self.quit.is_set():
             try:
-                if not found or time.time() - found > FIND_EVERY:
-                    new = self.where(self.link.blend)
-                    for p in new:
-                        if p not in self.paths:
-                            self.log(f"Watching {p}")
-                    self.paths, found = new, time.time()
+                self.path = self.where()
+                self.tell("watching", f"Watching {self.path}")
                 self.look()
             except Exception as e:
                 self.tell(f"folder:{e}", f"⚠ {FOLDER}: {e}")
@@ -88,11 +67,10 @@ class Watcher:
 
     def look(self):
         files = []
-        for d in self.paths:
-            for e in os.scandir(d):
-                if e.name.lower().endswith(".psd") and not e.name.startswith((".", "~")):
-                    st = os.stat(e.path)
-                    files.append((st.st_mtime, st.st_size, e.path))
+        for e in os.scandir(self.path):
+            if e.name.lower().endswith(".psd") and not e.name.startswith((".", "~")):
+                st = os.stat(e.path)
+                files.append((st.st_mtime, st.st_size, e.path))
         for mtime, size, path in sorted(files):     # the newest last: it wins
             stamp = [round(mtime, 2), size]
             if self.quit.is_set():
@@ -135,3 +113,10 @@ class Watcher:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.done, f, indent=1)
         os.replace(tmp, self.record)
+        if msg.startswith("✓"):
+            try:
+                st = os.stat(path)
+                if [round(st.st_mtime, 2), st.st_size] == stamp:    # not saved again meanwhile
+                    os.remove(path)
+            except OSError:
+                pass                        # still open on the iPad: it is not imported again
