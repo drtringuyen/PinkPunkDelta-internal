@@ -194,8 +194,8 @@ def register():
     global _previews
     _previews = bpy.utils.previews.new()
     bpy.types.WindowManager.ppd_link_host = StringProperty(
-        name="Address", description="Empty: this PC's Wi-Fi address. Set it when the QR code "
-                                    "shows the wrong network (VPN, virtual adapter)")
+        name="Address", description="Empty: this PC's name. Type its number when the iPad "
+                                    "does not find the name")
     for c in CLASSES:
         bpy.utils.register_class(c)
 

@@ -42,9 +42,21 @@ def token():
         return t
 
 
+def pc_name():
+    """This PC by name: it stays when the number changes."""
+    name = socket.gethostname()
+    return name if name.lower().endswith(".local") else name + ".local"
+
+
 def host():
-    """This PC's address for the iPad: typed, else the real network adapter's, else a guess."""
-    return bpy.context.window_manager.ppd_link_host.strip() or monitor.ip or srv.local_ips()[0]
+    """The one address the iPad uses, for the page and the shared folder alike: typed, else the
+    PC's name."""
+    return bpy.context.window_manager.ppd_link_host.strip() or pc_name()
+
+
+def number():
+    """The same PC as a number, for a network that does not know its name."""
+    return monitor.ip or srv.local_ips()[0]
 
 
 def address(path=""):
@@ -177,7 +189,7 @@ def publish():
                      "kinds": [k for k in idn.KINDS if idn.image(o, k)]})
     server.psd_files = files
     info = {"ready": monitor.ready, "smb": smb_address(), "user": monitor.login,
-            "smbname": smb_address(socket.gethostname() + ".local"),
+            "smbnumber": smb_address(number()),
             "checks": [{"ok": ok, "text": text} for _k, ok, text in monitor.checks]}
     server.state = {"pc": info, "blend": os.path.basename(bpy.data.filepath) or "(unsaved .blend)",
                     "objects": objs, "waiting": [i["stem"] for i in inbox],

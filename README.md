@@ -35,6 +35,8 @@ The four textures of each object (show, load, folder, reload) and its Procreate 
 
 The address contains a key: do not share the QR code.
 
+The page, the QR code and the shared folder all use the PC's name (for example `AUCO.local`), so a new IP number changes nothing. If the iPad does not find the name, type the number into **Address**.
+
 ## 04.Split Parts & Ramps
 Edit Mode: select faces, **Add Split Part**. Each part has a color ramp whose steps are its light bands; faces in no part keep the plain NPR shading.
 - Parts are one number per face (`PPD_PART`), so a face is in one part only.

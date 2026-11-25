@@ -79,8 +79,8 @@
           <svg viewBox="0 0 300 170"><rect class="scr" x="4" y="4" width="292" height="162" rx="12"/><text x="150" y="36" text-anchor="middle" font-weight="700">Connect to Server</text><text class="s" x="20" y="70">Server</text><rect class="p" x="16" y="78" width="268" height="32" rx="7"/><text class="m" x="24" y="98" id="svgsmb"></text><rect x="206" y="126" width="78" height="28" rx="8" fill="#ff4fa3"/><text class="k" x="245" y="145" text-anchor="middle">Connect</text></svg>
           <h3><span class="num">2</span>Paste the address, Connect</h3>
           <p class="dim">Touch and hold the Server field, then Paste. Nothing else to type here.</p>
-          <p class="dim">Not found? Try the PC's name instead of its number:</p>
-          <div class="copy"><input id="smbname" readonly aria-label="Server address by name"><button class="quiet" data-copy="smbname">Copy</button></div>
+          <p class="dim">Not found? Try the PC's number instead of its name:</p>
+          <div class="copy"><input id="smbnumber" readonly aria-label="Server address by number"><button class="quiet" data-copy="smbnumber">Copy</button></div>
         </div>
         <div class="step">
           <svg viewBox="0 0 300 170"><rect class="scr" x="4" y="4" width="292" height="162" rx="12"/><text class="s" x="24" y="34">Guest</text><rect class="p" x="14" y="44" width="272" height="28" rx="7"/><text x="24" y="63">Registered User</text><text x="262" y="63">✓</text><text class="s" x="20" y="98">Name</text><text x="100" y="98" id="svguser"></text><path d="M20 108h262M20 138h262" stroke="#383340"/><text class="s" x="20" y="128">Password</text><text x="100" y="128">•••••••</text></svg>
@@ -156,7 +156,7 @@ $('file').onchange = () => {
 
 let pcready = null;
 function showPc(p) {
-  $('smb').value = p.smb; $('smbname').value = p.smbname; $('user').value = p.user;
+  $('smb').value = p.smb; $('smbnumber').value = p.smbnumber; $('user').value = p.user;
   $('svgsmb').textContent = p.smb; $('svguser').textContent = p.user;
   $('pctitle').textContent = '1 · Computer' + (p.ready ? ' ✓ ready' : p.checks.length ? ' – not ready yet' : '');
   if (pcready !== p.ready) { $('pcbox').open = !p.ready; pcready = p.ready; }

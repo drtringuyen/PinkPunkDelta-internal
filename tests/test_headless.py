@@ -154,6 +154,13 @@ def run():
     for s in (pc._SETUP, pc._REMOVE):
         ok("%" not in core.pc_script(s), "every placeholder is filled")
     core.monitor.user = ""
+    import socket
+    ok(core.host() == socket.gethostname().removesuffix(".local") + ".local", "the PC by name")
+    ok(f"//{core.host()}:" in core.address() and
+       core.smb_address() == f"smb://{core.host()}/{pc.SHARE}", "page and folder: one address")
+    bpy.context.window_manager.ppd_link_host = "192.168.1.5"
+    ok("192.168.1.5" in core.address() and "192.168.1.5" in core.smb_address(), "a typed address wins")
+    bpy.context.window_manager.ppd_link_host = ""
     core.check_pc = lambda follow=0.0: None
 
     print("live link")
