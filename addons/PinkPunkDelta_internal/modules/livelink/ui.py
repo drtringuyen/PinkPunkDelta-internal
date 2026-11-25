@@ -29,7 +29,8 @@ class PINKPUNKDELTA_INTERNAL_PT_Livelink(bpy.types.Panel):
             box.template_icon(icon_value=operators.qr_icon(), scale=9.0)
             row = box.row(align=True)
             row.operator("ppd.link_qr", icon='FULLSCREEN_ENTER')
-            row.operator("ppd.link_copy", icon='COPYDOWN')
+            row.operator("ppd.link_copy", text="Copy", icon='COPYDOWN')
+            row.operator("ppd.link_guide", icon='HELP')
             box.prop(context.window_manager, "ppd_link_host")
 
         if core.inbox:

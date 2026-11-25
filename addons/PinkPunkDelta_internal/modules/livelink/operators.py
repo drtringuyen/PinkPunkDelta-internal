@@ -68,13 +68,27 @@ class PPD_OT_link_qr(bpy.types.Operator):
 
 
 class PPD_OT_link_copy(bpy.types.Operator):
-    """Copy the address the iPad Shortcut sends to"""
+    """Copy the address of the page the QR code opens"""
     bl_idname = "ppd.link_copy"
     bl_label = "Copy Address"
 
     def execute(self, context):
-        context.window_manager.clipboard = core.address("upload")
+        context.window_manager.clipboard = core.address()
         self.report({'INFO'}, "Copied")
+        return {'FINISHED'}
+
+
+class PPD_OT_link_guide(bpy.types.Operator):
+    """Open the same page the iPad shows after scanning the QR code: setup guide and status"""
+    bl_idname = "ppd.link_guide"
+    bl_label = "Setup Guide"
+
+    @classmethod
+    def poll(cls, context):
+        return core.server is not None
+
+    def execute(self, context):
+        bpy.ops.wm.url_open(url=core.address())
         return {'FINISHED'}
 
 
@@ -172,7 +186,7 @@ class PPD_OT_inbox_drop(bpy.types.Operator):
         return {'FINISHED'}
 
 
-CLASSES = (PPD_OT_link_start, PPD_OT_link_stop, PPD_OT_link_qr, PPD_OT_link_copy,
+CLASSES = (PPD_OT_link_start, PPD_OT_link_stop, PPD_OT_link_qr, PPD_OT_link_copy, PPD_OT_link_guide,
            PPD_OT_prepare_psd, PPD_OT_inbox_assign, PPD_OT_inbox_drop)
 
 
