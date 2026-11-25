@@ -9,6 +9,7 @@ _LOADED = {}
 ALL_MODULES = [    {"name": "setup", "op": "pinkpunkdelta_internal.toggle_setup", "icon": "OBJECT_DATA"},
     {"name": "bakenlink", "op": "pinkpunkdelta_internal.toggle_bakenlink", "icon": "RENDER_STILL"},
     {"name": "livelink", "op": "pinkpunkdelta_internal.toggle_livelink", "icon": "URL"},
+    {"name": "parts", "op": "pinkpunkdelta_internal.toggle_parts", "icon": "MOD_EDGESPLIT"},
 ]
 
 

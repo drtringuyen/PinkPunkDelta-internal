@@ -9,8 +9,8 @@ import re
 import uuid
 
 import bpy
-from bpy.props import (BoolProperty, FloatProperty, FloatVectorProperty, PointerProperty,
-                       StringProperty)
+from bpy.props import (BoolProperty, CollectionProperty, FloatProperty, IntProperty,
+                       FloatVectorProperty, PointerProperty, StringProperty)
 
 KINDS = ("ALB", "NOR", "SHD", "TEX")
 BAKED = ("ALB", "NOR")          # SHD / TEX only ever come from files
@@ -28,6 +28,18 @@ def _poll_original(self, o):
     return o.type == 'MESH' and o != self.id_data
 
 
+def _ignore_alb(self, context):
+    from . import bands
+    bands.show_ignore(self.id_data)
+
+
+class PPD_Part(bpy.types.PropertyGroup):
+    """A split part: the faces whose PPD_PART is `pid`. `name` is only a label."""
+    pid: IntProperty()
+    ignore_alb: BoolProperty(name="Ignore ALB", default=False, update=_ignore_alb,
+                             description="The ramp alone colors this part, without the Albedo")
+
+
 class PPD_ObjectData(bpy.types.PropertyGroup):
     is_setup: BoolProperty(default=False)
     key: StringProperty()           # never changes: tells a duplicate from its source
@@ -43,6 +55,9 @@ class PPD_ObjectData(bpy.types.PropertyGroup):
     tex: PointerProperty(type=bpy.types.Image)
     cage: FloatProperty(name="Cage", default=0.02, min=0.0, soft_max=0.5, subtype='DISTANCE',
                         description="How far outside the surface the bake rays start")
+    parts: CollectionProperty(type=PPD_Part)
+    bands: PointerProperty(type=bpy.types.NodeTree)         # its own NPR with the ramps in
+    npr_source: PointerProperty(type=bpy.types.NodeTree)    # the NPR that was copied
     canvas: StringProperty(description="Procreate canvas linked to this object by hand")
 
 
@@ -132,7 +147,7 @@ def new_key():
     return uuid.uuid4().hex
 
 
-CLASSES = (PPD_ObjectData, PPD_SceneData)
+CLASSES = (PPD_Part, PPD_ObjectData, PPD_SceneData)
 
 
 def register():

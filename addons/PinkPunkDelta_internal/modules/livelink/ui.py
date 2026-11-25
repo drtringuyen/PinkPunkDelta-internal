@@ -48,7 +48,7 @@ class PINKPUNKDELTA_INTERNAL_PT_Livelink(bpy.types.Panel):
             if body is None:
                 continue
             col = body.box().column(align=True)
-            for k in ("SHD", "TEX"):
+            for k in idn.KINDS:
                 if textures:
                     bake_ui.draw_texture(col, o, k)
                 else:

@@ -68,18 +68,11 @@ class PINKPUNKDELTA_INTERNAL_PT_Bakenlink(bpy.types.Panel):
             sub = row.row(align=True)
             sub.ui_units_x = 5
             sub.prop(o.ppd, "cage")
-            col = box.column(align=True)
-            for k in idn.KINDS:
-                draw_texture(col, o, k)
             why = bake.problem(o)
             row = box.row(align=True)
             row.enabled = not why
             op = row.operator("ppd.bake", text=why or "Bake ALB + NOR", icon='RENDER_STILL')
             op.object_name = o.name
-            if not why:
-                for k in idn.BAKED:
-                    op = row.operator("ppd.bake", text=k)
-                    op.object_name, op.which = o.name, k
         if len(objs) > 1:
             layout.operator("ppd.bake", text="Bake All", icon='RENDER_STILL').object_name = ""
 

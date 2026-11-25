@@ -137,6 +137,17 @@ class PINKPUNKDELTA_INTERNAL_OT_ToggleLivelink(bpy.types.Operator):
         module_manager.toggle("livelink")
         return {'FINISHED'}
 
+
+class PINKPUNKDELTA_INTERNAL_OT_ToggleParts(bpy.types.Operator):
+    """Toggle Parts module on/off"""
+    bl_idname = "pinkpunkdelta_internal.toggle_parts"
+    bl_label = "Parts"
+
+    def execute(self, context):
+        from . import module_manager
+        module_manager.toggle("parts")
+        return {'FINISHED'}
+
 def register():
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_Build)
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_Reload)
@@ -146,9 +157,11 @@ def register():
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_ToggleSetup)
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_ToggleBakenlink)
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_ToggleLivelink)
+    bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_ToggleParts)
 
 
 def unregister():
+    bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_ToggleParts)
     bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_ToggleLivelink)
     bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_ToggleBakenlink)
     bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_ToggleSetup)

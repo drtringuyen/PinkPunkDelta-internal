@@ -11,7 +11,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import identity as idn
-from . import material
+from . import bands, material
 
 INTERVAL = 1.0
 _moved = {}             # new path -> old path, this session: an undone F2 finds its file
@@ -144,6 +144,7 @@ def sync_object(obj, old_central="", copy=False):
     name = "MAT_" + obj.name
     if mat.name != name and mat.library is None:
         mat.name = name
+    bands.sync(obj)
 
 
 def split_duplicates():
@@ -180,6 +181,7 @@ def own_material(obj):
     for s in obj.material_slots:
         if s.material == old:
             s.material = obj.ppd.material
+    bands.make_own(obj)
 
 
 def sync_all(old_central="", copy=False):
@@ -254,6 +256,7 @@ def problems():
                 out.append((o.name, f"{k} file is elsewhere"))
             elif tuple(img.size) != (idn.SIZE, idn.SIZE):
                 out.append((o.name, f"{k} is {img.size[0]}x{img.size[1]}, not 8K"))
+        out += [(o.name, t) for t in bands.problems(o)]
         if d.original is None and len(o.data.polygons):
             out.append((o.name, "no Original picked"))
     return out
@@ -273,6 +276,10 @@ def check_and_fix():
     else:
         sync_all()
     for o in idn.objects():
+        try:
+            bands.fix(o)
+        except RuntimeError as e:
+            messages.append(str(e))
         for k in idn.KINDS:
             img = idn.image(o, k)
             if img is not None and os.path.isfile(idn.abspath(img)):
