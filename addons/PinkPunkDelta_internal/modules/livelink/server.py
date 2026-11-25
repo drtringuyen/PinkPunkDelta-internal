@@ -221,26 +221,53 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             shutil.copyfileobj(f, self.wfile, 1 << 20)
 
+    def _body(self):
+        """The whole upload. An iPad Shortcut that sends a file as the body streams it
+        (chunked), without a Content-Length."""
+        data = bytearray()
+
+        def read(n):
+            if len(data) + n > MAX_UPLOAD:
+                raise ValueError("The file is larger than 2 GB")
+            while n > 0:
+                part = self.rfile.read(min(n, 1 << 20))
+                if not part:
+                    raise ValueError("The upload was cut off, send it again")
+                data.extend(part)
+                n -= len(part)
+
+        if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+            while True:
+                line = self.rfile.readline(1024)
+                if not line:
+                    raise ValueError("The upload was cut off, send it again")
+                size = line.split(b";")[0].strip()
+                if not re.fullmatch(rb"[0-9A-Fa-f]{1,8}", size):
+                    raise ValueError("The upload was damaged, send it again")
+                if not int(size, 16):
+                    break
+                read(int(size, 16))
+                self.rfile.readline(1024)       # the line end after each chunk
+            while self.rfile.readline(1024).strip():
+                pass                            # trailers
+        else:
+            n = self.headers.get("Content-Length", "")
+            read(int(n) if n.isdigit() else 0)
+        if not data:
+            raise ValueError("Nothing arrived: in the Shortcut, the file must be Shortcut Input")
+        return data
+
     def do_POST(self):
         if not self._open():
             return
         if self.route != "/upload":
             self._send(404, "Not found")
             return
-        n = int(self.headers.get("Content-Length") or 0)
-        if not 0 < n <= MAX_UPLOAD:
+        try:
+            data = self._body()
+        except ValueError as e:
             self.close_connection = True
-            self._send(413, "Empty or too large")
-            return
-        data = bytearray()
-        while len(data) < n:
-            part = self.rfile.read(min(n - len(data), 1 << 20))
-            if not part:
-                break
-            data += part
-        if len(data) < n:
-            self.close_connection = True
-            self._send(400, "The upload was cut off")
+            self._send(400, f"⚠ {e}")
             return
         files = parse_upload(self.headers.get("Content-Type", ""), bytes(data), self.query)
         del data

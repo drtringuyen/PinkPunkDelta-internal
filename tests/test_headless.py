@@ -187,6 +187,17 @@ def run():
     ok(low.ppd.tex is not None, "TEX_ png")
     call(url + "/upload?t=testtoken", *form("Untitled Artwork.psd", body))
     ok(len(core.inbox) == 1, "unknown canvas waits")
+    core.drop(core.inbox[0])
+
+    def stream():       # urllib sends an iterable body chunked, as the iPad does
+        for i in range(0, len(body), 5000):
+            yield body[i:i + 5000]
+    r = call(url + "/upload?t=testtoken", stream(), {"Content-Type": "application/octet-stream"})
+    ok(r["code"] == 200 and core.inbox[0]["stem"] == "Untitled", "streamed upload")
+    core.drop(core.inbox[0])
+    r = call(url + "/upload?t=testtoken", b"")
+    ok(r["code"] == 400 and b"Nothing arrived" in r["body"], "empty upload is named")
+    call(url + "/upload?t=testtoken", *form("Untitled Artwork.psd", body))
     bpy.ops.ppd.inbox_assign(item_id=core.inbox[0]["id"], object_name=low.name)
     ok(not core.inbox and core.find_object("Untitled_Artwork") == low, "and is remembered")
     names(low)
