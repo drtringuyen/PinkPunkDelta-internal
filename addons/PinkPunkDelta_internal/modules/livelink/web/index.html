@@ -6,36 +6,112 @@
 <meta name="referrer" content="no-referrer">
 <title>PPD LiveLink</title>
 <style>
-  body { margin:0; background:#17151a; color:#eee; font:16px/1.45 -apple-system, "Segoe UI", sans-serif; }
-  main { max-width:720px; margin:0 auto; padding:20px 16px 60px; }
-  h1 { font-size:22px; margin:0; color:#ff4fa3; }
-  .dim { color:#a49fa9; font-size:14px; }
-  section { background:#232027; border:1px solid #383340; border-radius:14px; padding:16px; margin:14px 0; }
-  h2 { font-size:17px; margin:0 0 8px; }
-  .row { display:flex; gap:10px; align-items:center; padding:10px 0; border-top:1px solid #383340; flex-wrap:wrap; }
+  :root { --bg:#17151a; --card:#232027; --line:#383340; --fg:#eee; --dim:#aca6b2; --pink:#ff4fa3; --ok:#58d08f; --bad:#ff8a5c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:980px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:24px; margin:0; color:var(--pink); }
+  h2 { font-size:19px; margin:0 0 4px; } h3 { font-size:16px; margin:10px 0 2px; }
+  p { margin:6px 0; } b { color:#fff; }
+  .dim { color:var(--dim); font-size:14px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:14px 0; }
+  .row { display:flex; gap:10px; align-items:center; padding:10px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
   .name { flex:1; min-width:160px; word-break:break-word; }
-  .bar { height:6px; background:#383340; border-radius:3px; overflow:hidden; width:100%; }
-  .bar div { height:100%; width:0; background:#ff4fa3; }
-  a.btn, button { background:#ff4fa3; color:#17151a; border:0; border-radius:8px; padding:10px 14px; font:600 15px inherit; text-decoration:none; }
-  input[readonly] { width:100%; box-sizing:border-box; background:#111; color:#eee; border:1px solid #383340; border-radius:8px; padding:10px; margin:6px 0; }
-  li { margin:7px 0; } pre { white-space:pre-wrap; color:#a49fa9; font-size:13px; margin:0; }
-  summary { font-weight:600; }
+  .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
+  .bar div { height:100%; width:0; background:var(--pink); }
+  a.btn, button { background:var(--pink); color:#17151a; border:0; border-radius:10px; padding:11px 16px; font:600 15px -apple-system, "Segoe UI", sans-serif; text-decoration:none; }
+  button.quiet { background:var(--line); color:var(--fg); }
+  .copy { display:flex; gap:8px; margin:6px 0 10px; }
+  .copy input { flex:1; min-width:0; background:#111; color:#fff; border:1px solid var(--line); border-radius:10px; padding:11px; font:14px ui-monospace, Menlo, Consolas, monospace; }
+  .copy button { min-width:92px; } .step .copy { flex-wrap:wrap; } .step .copy input { flex:1 0 100%; }
+  ul.checks { list-style:none; margin:8px 0 0; padding:0; display:grid; gap:4px 18px; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); font-size:14px; }
+  .yes::before { content:"✓ "; color:var(--ok); font-weight:700; } .no::before { content:"✕ "; color:var(--bad); font-weight:700; }
+  .no { color:var(--bad); }
+  .steps { display:grid; gap:14px; grid-template-columns:repeat(auto-fit, minmax(270px, 1fr)); margin-top:12px; }
+  .step { background:#1b191f; border:1px solid var(--line); border-radius:12px; padding:12px; min-width:0; }
+  .step svg, .flow svg { width:100%; height:auto; display:block; border-radius:8px; }
+  .num { display:inline-flex; width:26px; height:26px; border-radius:50%; background:var(--pink); color:#17151a; font-weight:700; align-items:center; justify-content:center; margin-right:8px; }
+  .flow { overflow-x:auto; } .flow svg { min-width:620px; }
+  summary { font-weight:600; font-size:19px; cursor:pointer; }
+  svg text { font-family:-apple-system, "Segoe UI", sans-serif; fill:#eee; font-size:13px; }
+  svg text.s { font-size:11px; fill:#aca6b2; } svg text.k { fill:#17151a; font-weight:700; } svg text.m { font-family:ui-monospace, Menlo, Consolas, monospace; font-size:10.5px; fill:#fff; }
+  svg .p { fill:none; stroke:#ff4fa3; stroke-width:2.5; } svg .scr { fill:#0e0d10; stroke:#4a4452; stroke-width:1.5; } svg .c { fill:#2b2730; }
+  pre { white-space:pre-wrap; color:var(--dim); font-size:13px; margin:0; }
 </style>
 </head>
 <body>
 <main>
   <h1>PPD LiveLink</h1>
   <div class="dim" id="blend">Connecting…</div>
-  <section>
-    <h2>Procreate files</h2>
-    <div class="dim">Tap Get PSD, then open the download with Procreate. Paint on <b>SHD</b> and <b>TEX</b>. More layers: group them and name the group SHD or TEX.</div>
-    <div id="objects"></div>
+
+  <section class="flow">
+    <svg viewBox="0 0 900 150" role="img" aria-label="Blender prepares the PSD, the iPad opens it in Procreate, you paint SHD and TEX, save to the PPD_Procreate folder, and Blender imports it">
+      <g transform="translate(5,15)"><rect class="c" width="150" height="105" rx="10"/><rect class="scr" x="35" y="12" width="80" height="46" rx="4"/><path d="M62 70h26M75 58v12" stroke="#4a4452" stroke-width="3"/><text x="75" y="40" text-anchor="middle">Blender</text><text x="75" y="92" text-anchor="middle">Prepare PSD</text></g>
+      <g transform="translate(192,15)"><rect class="c" width="150" height="105" rx="10"/><rect class="scr" x="50" y="10" width="50" height="54" rx="6"/><path d="M75 22v22m-9-9 9 9 9-9" class="p"/><text x="75" y="92" text-anchor="middle">Get PSD (below)</text></g>
+      <g transform="translate(379,15)"><rect class="c" width="150" height="105" rx="10"/><rect class="scr" x="50" y="10" width="50" height="54" rx="6"/><path d="M60 52c10-28 18 4 30-28" class="p"/><text x="75" y="92" text-anchor="middle">Paint SHD + TEX</text></g>
+      <g transform="translate(566,15)"><rect class="c" width="150" height="105" rx="10"/><path d="M45 18h22l7 8h32v34H45z" fill="#ff4fa3"/><text x="75" y="48" text-anchor="middle" class="k">PPD</text><text x="75" y="82" text-anchor="middle">Share, PSD,</text><text x="75" y="98" text-anchor="middle">Save to Files</text></g>
+      <g transform="translate(745,15)"><rect class="c" width="150" height="105" rx="10"/><rect class="scr" x="35" y="12" width="80" height="46" rx="4"/><path d="M60 34l11 11 22-24" stroke="#58d08f" stroke-width="5" fill="none"/><path d="M62 70h26M75 58v12" stroke="#4a4452" stroke-width="3"/><text x="75" y="92" text-anchor="middle">Imported by itself</text></g>
+      <g class="p"><path d="M160 65h24m-8-7 8 7-8 7"/><path d="M347 65h24m-8-7 8 7-8 7"/><path d="M534 65h24m-8-7 8 7-8 7"/><path d="M719 65h20m-8-7 8 7-8 7"/></g>
+      <text class="s" x="450" y="142" text-anchor="middle">PC by cable or Wi-Fi, iPad by Wi-Fi: both on the same router, not the guest Wi-Fi</text>
+    </svg>
   </section>
+
   <section>
-    <h2>Send back</h2>
-    <div class="dim">In Procreate: Actions → Share → <b>PSD</b> → <b>Save to Files</b> → this PC → <b>PPD_Procreate</b>. Blender imports it by itself. Without the PC folder: save it anywhere, tap <b>Send back</b> beside its object above and pick it.</div>
+    <details id="pcbox">
+      <summary id="pctitle">1 · Computer</summary>
+      <p class="dim">In Blender: N, tab <b>PPD</b>, 03.LiveLink, <b>iPad Setup</b>, <b>Set Up This PC</b>. Windows asks once, press Yes. This list updates by itself.</p>
+      <ul class="checks" id="checks"></ul>
+    </details>
+  </section>
+
+  <section>
+    <details id="ipadbox">
+      <summary>2 · iPad, once</summary>
+      <div class="steps">
+        <div class="step">
+          <svg viewBox="0 0 300 170"><rect class="scr" x="4" y="4" width="292" height="162" rx="12"/><rect class="c" x="12" y="12" width="116" height="146" rx="8"/><text x="24" y="37" font-weight="700">Files</text><circle class="p" cx="108" cy="32" r="13"/><text x="108" y="36" text-anchor="middle">•••</text><text class="s" x="24" y="66">On My iPad</text><text class="s" x="24" y="90">iCloud Drive</text><rect class="c" x="140" y="24" width="146" height="104" rx="10"/><text class="s" x="152" y="46">Scan Documents</text><rect class="p" x="146" y="58" width="134" height="30" rx="7"/><text x="156" y="78">Connect to Server</text><text class="s" x="152" y="112">Edit Sidebar</text></svg>
+          <h3><span class="num">1</span>Files, ••• , Connect to Server</h3>
+          <p class="dim">Copy the address first, then open Files.</p>
+          <div class="copy"><input id="smb" readonly aria-label="Server address"><button data-copy="smb">Copy</button></div>
+          <a class="btn" href="shareddocuments://">Open Files</a>
+        </div>
+        <div class="step">
+          <svg viewBox="0 0 300 170"><rect class="scr" x="4" y="4" width="292" height="162" rx="12"/><text x="150" y="36" text-anchor="middle" font-weight="700">Connect to Server</text><text class="s" x="20" y="70">Server</text><rect class="p" x="16" y="78" width="268" height="32" rx="7"/><text class="m" x="24" y="98" id="svgsmb"></text><rect x="206" y="126" width="78" height="28" rx="8" fill="#ff4fa3"/><text class="k" x="245" y="145" text-anchor="middle">Connect</text></svg>
+          <h3><span class="num">2</span>Paste the address, Connect</h3>
+          <p class="dim">Touch and hold the Server field, then Paste. Nothing else to type here.</p>
+          <p class="dim">Not found? Try the PC's name instead of its number:</p>
+          <div class="copy"><input id="smbname" readonly aria-label="Server address by name"><button class="quiet" data-copy="smbname">Copy</button></div>
+        </div>
+        <div class="step">
+          <svg viewBox="0 0 300 170"><rect class="scr" x="4" y="4" width="292" height="162" rx="12"/><text class="s" x="24" y="34">Guest</text><rect class="p" x="14" y="44" width="272" height="28" rx="7"/><text x="24" y="63">Registered User</text><text x="262" y="63">✓</text><text class="s" x="20" y="98">Name</text><text x="100" y="98" id="svguser"></text><path d="M20 108h262M20 138h262" stroke="#383340"/><text class="s" x="20" y="128">Password</text><text x="100" y="128">•••••••</text></svg>
+          <h3><span class="num">3</span>Registered User</h3>
+          <p class="dim">Name:</p>
+          <div class="copy"><input id="user" readonly aria-label="User name"><button data-copy="user">Copy</button></div>
+          <p class="dim">Password: the one of this Windows account, <b>not the PIN</b>. With a Microsoft account, use that account's e-mail and password. An account without a password cannot connect.</p>
+        </div>
+      </div>
+      <p><button class="quiet" id="done">Done, hide these steps</button></p>
+    </details>
+  </section>
+
+  <section>
+    <h2>3 · Every time</h2>
+    <p class="dim">Get the PSD, open it in Procreate, paint on <b>SHD</b> and <b>TEX</b>. More layers: group them and name the group SHD or TEX. Keep the artwork's name.</p>
+    <div id="objects"></div>
+    <div class="steps">
+      <div class="step">
+        <svg viewBox="0 0 300 150"><rect class="scr" x="4" y="4" width="292" height="142" rx="12"/><rect class="c" x="14" y="14" width="150" height="122" rx="8"/><text x="26" y="38" font-weight="700">Actions</text><rect class="p" x="22" y="48" width="58" height="26" rx="6"/><text x="33" y="66">Share</text><text class="s" x="30" y="94">Procreate</text><rect class="p" x="22" y="102" width="130" height="26" rx="6"/><text x="30" y="120">PSD</text><path d="M176 75h26m-9-8 9 8-9 8" class="p"/><rect class="c" x="214" y="50" width="74" height="50" rx="8"/><text x="251" y="72" text-anchor="middle">Save to</text><text x="251" y="90" text-anchor="middle">Files</text></svg>
+        <h3>Wrench, Share, PSD, Save to Files</h3>
+      </div>
+      <div class="step">
+        <svg viewBox="0 0 300 150"><rect class="scr" x="4" y="4" width="292" height="142" rx="12"/><text class="s" x="20" y="34">Shared</text><rect class="p" x="14" y="48" width="180" height="36" rx="7"/><path d="M24 58h9l3 3h12v14H24z" fill="#ff4fa3"/><text x="58" y="71">PPD_Procreate</text><rect x="210" y="16" width="74" height="28" rx="8" fill="#ff4fa3"/><text class="k" x="247" y="35" text-anchor="middle">Save</text><text class="s" x="20" y="116">Files offers the same folder next time.</text></svg>
+        <h3>PPD_Procreate, Save</h3>
+        <p class="dim">Blender shows ✓ after a few seconds. Folder missing? Open it once in the Files app.</p>
+      </div>
+    </div>
     <p id="sendmsg"></p>
     <div class="bar" id="bar" hidden><div></div></div>
+    <p class="dim">No PC folder? Save the PSD anywhere on the iPad and tap <b>Send back</b> beside its object.</p>
     <input type="file" id="file" hidden>
   </section>
   <section><h2>Activity</h2><pre id="log">—</pre></section>
@@ -45,6 +121,20 @@ const $ = id => document.getElementById(id);
 const t = new URLSearchParams(location.search).get('t') || '';
 const q = '?t=' + encodeURIComponent(t);
 let last = '', target = '', sending = false;
+
+const mem = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
+$('ipadbox').open = !mem.get('ppd_ipad_done');
+$('done').onclick = () => { mem.set('ppd_ipad_done', '1'); $('ipadbox').open = false; };
+
+document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => {
+  const el = $(b.dataset.copy), said = b.dataset.said || (b.dataset.said = b.textContent);
+  el.focus(); el.setSelectionRange(0, 9999);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  b.textContent = ok ? 'Copied ✓' : 'Hold to copy';
+  setTimeout(() => { b.textContent = said; }, 1800);
+});
+
 $('file').onchange = () => {
   const f = $('file').files[0];
   if (!f) return;
@@ -63,6 +153,18 @@ $('file').onchange = () => {
   x.setRequestHeader('Content-Type', 'application/octet-stream');
   x.send(f);
 };
+
+let pcready = null;
+function showPc(p) {
+  $('smb').value = p.smb; $('smbname').value = p.smbname; $('user').value = p.user;
+  $('svgsmb').textContent = p.smb; $('svguser').textContent = p.user;
+  $('pctitle').textContent = '1 · Computer' + (p.ready ? ' ✓ ready' : p.checks.length ? ' – not ready yet' : '');
+  if (pcready !== p.ready) { $('pcbox').open = !p.ready; pcready = p.ready; }
+  $('checks').replaceChildren(...p.checks.map(c => {
+    const li = document.createElement('li'); li.className = c.ok ? 'yes' : 'no'; li.textContent = c.text; return li;
+  }));
+}
+
 async function refresh() {
   try {
     const text = await (await fetch('/state' + q, {cache:'no-store'})).text();
@@ -70,6 +172,7 @@ async function refresh() {
     last = text;
     const s = JSON.parse(text);
     $('blend').textContent = 'Linked to ' + s.blend + (s.waiting && s.waiting.length ? ' — waiting in Blender: ' + s.waiting.join(', ') : '');
+    if (s.pc) showPc(s.pc);
     $('objects').replaceChildren(...s.objects.map(o => {
       const row = document.createElement('div'); row.className = 'row';
       const n = document.createElement('div'); n.className = 'name'; n.textContent = o.name;
@@ -83,7 +186,7 @@ async function refresh() {
         const d = document.createElement('div'); d.className = 'dim'; d.textContent = 'Prepare PSD in Blender'; row.append(d);
       }
       const b = document.createElement('button');
-      b.textContent = 'Send back';
+      b.className = 'quiet'; b.textContent = 'Send back';
       b.onclick = () => { if (sending) return; target = o.name; $('file').value = ''; $('file').click(); };
       row.append(b);
       return row;

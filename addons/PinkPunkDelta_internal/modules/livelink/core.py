@@ -5,6 +5,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import time
 import traceback
 import uuid
@@ -14,13 +15,14 @@ import bpy
 from ... import identity as idn
 from ... import links
 from ..bakenlink import bake, operators as bake_ops
-from . import psd, server as srv, watch
+from . import pc, psd, server as srv, watch
 
 PORT = 8770
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 
 server = None
 watcher = None
+monitor = pc.Monitor()
 watch_folder = watch.folder        # the tests put their own here
 inbox = []              # dicts: id, stem, psd, files {kind or '': path}
 log_lines = collections.deque(maxlen=30)
@@ -28,7 +30,7 @@ _last = 0.0
 
 
 def token():
-    """One per computer, kept, so the iPad Shortcut is built once."""
+    """One per computer, kept, so the iPad's bookmark of the page keeps working."""
     path = os.path.join(bpy.utils.user_resource('CONFIG', create=True), "ppd_livelink.json")
     try:
         with open(path, encoding="utf-8") as f:
@@ -40,9 +42,39 @@ def token():
         return t
 
 
+def host():
+    """This PC's address for the iPad: typed, else the real network adapter's, else a guess."""
+    return bpy.context.window_manager.ppd_link_host.strip() or monitor.ip or srv.local_ips()[0]
+
+
 def address(path=""):
-    host = bpy.context.window_manager.ppd_link_host.strip() or srv.local_ips()[0]
-    return f"http://{host}:{PORT}/{path}?t={token()}"
+    return f"http://{host()}:{PORT}/{path}?t={token()}"
+
+
+def smb_address(name=""):
+    return f"smb://{name or host()}/{pc.SHARE}"
+
+
+def check_pc(follow=0.0):
+    monitor.start(watch_folder(), bpy.app.binary_path, PORT,
+                  bpy.context.window_manager.ppd_link_host.strip(), follow)
+    if not bpy.app.timers.is_registered(_check_tick):
+        bpy.app.timers.register(_check_tick, first_interval=0.5)
+
+
+def _check_tick():
+    """The panel follows the check, link on or off."""
+    if monitor.changed:
+        monitor.changed = False
+        redraw()
+    return 0.5 if monitor.busy or monitor.changed else None
+
+
+def pc_script(script):
+    v = "{}.{}".format(*bpy.app.version[:2])
+    return pc.fill(script, FOLDER=watch_folder(), SHARE=pc.SHARE, USER=monitor.user,
+                   RULE=pc.rule_name(v), RULE_FILES=pc.RULE_FILES, PORT=str(PORT),
+                   PROGRAM=bpy.app.binary_path)
 
 
 def log(msg):
@@ -144,7 +176,10 @@ def publish():
                      "size": os.path.getsize(p) if ready else 0,
                      "kinds": [k for k in idn.KINDS if idn.image(o, k)]})
     server.psd_files = files
-    server.state = {"blend": os.path.basename(bpy.data.filepath) or "(unsaved .blend)",
+    info = {"ready": monitor.ready, "smb": smb_address(), "user": monitor.login,
+            "smbname": smb_address(socket.gethostname() + ".local"),
+            "checks": [{"ok": ok, "text": text} for _k, ok, text in monitor.checks]}
+    server.state = {"pc": info, "blend": os.path.basename(bpy.data.filepath) or "(unsaved .blend)",
                     "objects": objs, "waiting": [i["stem"] for i in inbox],
                     "log": list(log_lines)[:10]}
 
@@ -187,6 +222,7 @@ def start():
     s = srv.LinkServer(PORT, WEB_DIR, token())
     s.start()
     server = s
+    check_pc()
     publish()
     record = os.path.join(bpy.utils.user_resource('CONFIG', create=True), "ppd_watch.json")
     watcher = watch.Watcher(s, lambda n: s.names.get(norm(n), ""), log, record,

@@ -19,7 +19,7 @@ import PinkPunkDelta_internal as addon          # noqa: E402
 addon.register()
 from PinkPunkDelta_internal import identity as idn, links, material     # noqa: E402
 from PinkPunkDelta_internal.modules.bakenlink import bake               # noqa: E402
-from PinkPunkDelta_internal.modules.livelink import core, prepare, psd, qr  # noqa: E402
+from PinkPunkDelta_internal.modules.livelink import core, pc, prepare, psd, qr  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix="ppd_test_")
 core.token = lambda: "testtoken"
@@ -131,6 +131,30 @@ def run():
     src = prepare.pixels(low.ppd.alb)
     ok((got["ALB"][:, :, :3] == src[:, :, :3]).all(), "ALB is exact")
     del got, src, data
+
+    print("pc setup")
+    prog = r"C:\Program Files\Blender.exe"
+    good = {"nets": [{"ip": "10.8.0.2", "name": "VPN", "hardware": False, "category": "Public"},
+                     {"ip": "192.168.1.5", "name": "Ethernet", "hardware": True,
+                      "category": "Private"}],
+            "share": r"c:\ppd_procreate", "server": "Running", "user": r"PC\me",
+            "rules": [{"name": "a", "program": prog, "port": "8799", "profile": "Private"},
+                      {"name": "b", "program": "Any", "port": "445", "profile": "Any"}]}
+    checks, ip = pc.evaluate(good, r"C:\PPD_Procreate", prog.upper(), 8799)
+    ok(ip == "192.168.1.5" and all(c[1] for c in checks), "ready, the VPN is not picked")
+    for key, change in (("share", {"share": r"D:\else"}), ("link", {"rules": []}),
+                        ("files", {"rules": []}), ("service", {"server": "Stopped"}),
+                        ("net", {"nets": []})):
+        c = {k: o for k, o, _t in pc.evaluate({**good, **change}, r"C:\PPD_Procreate", prog, 8799)[0]}
+        ok(not c[key], f"{key} missing is seen")
+    one = dict(good, rules=good["rules"][0], nets=good["nets"][1])
+    ok(pc.evaluate(one, r"C:\PPD_Procreate", prog, 8799)[1] == "192.168.1.5", "a single entry")
+    ok(pc.quote("a'; calc") == "'a" + "'" * 2 + "; calc'", "quoted as text")
+    core.monitor.user = r"PC\o'hara"
+    for s in (pc._SETUP, pc._REMOVE):
+        ok("%" not in core.pc_script(s), "every placeholder is filled")
+    core.monitor.user = ""
+    core.check_pc = lambda follow=0.0: None
 
     print("live link")
     core.start()
