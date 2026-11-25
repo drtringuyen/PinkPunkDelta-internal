@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>PPD LiveLink</title>
+<style>
+  body { margin:0; background:#17151a; color:#eee; font:16px/1.45 -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:22px; margin:0; color:#ff4fa3; }
+  .dim { color:#a49fa9; font-size:14px; }
+  section { background:#232027; border:1px solid #383340; border-radius:14px; padding:16px; margin:14px 0; }
+  h2 { font-size:17px; margin:0 0 8px; }
+  .row { display:flex; gap:10px; align-items:center; padding:10px 0; border-top:1px solid #383340; flex-wrap:wrap; }
+  .name { flex:1; min-width:160px; word-break:break-word; }
+  a.btn, button { background:#ff4fa3; color:#17151a; border:0; border-radius:8px; padding:10px 14px; font:600 15px inherit; text-decoration:none; }
+  input[readonly] { width:100%; box-sizing:border-box; background:#111; color:#eee; border:1px solid #383340; border-radius:8px; padding:10px; margin:6px 0; }
+  li { margin:7px 0; } pre { white-space:pre-wrap; color:#a49fa9; font-size:13px; margin:0; }
+  summary { font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>PPD LiveLink</h1>
+  <div class="dim" id="blend">Connecting…</div>
+  <section>
+    <h2>Procreate files</h2>
+    <div class="dim">Tap Get PSD, then open the download with Procreate. Paint on <b>SHD</b> and <b>TEX</b>. More layers: group them and name the group SHD or TEX.</div>
+    <div id="objects"></div>
+  </section>
+  <section>
+    <details>
+      <summary>One time: the “Send to Blender” Shortcut</summary>
+      <ol>
+        <li>Copy this address: <input id="url" readonly><button id="copy">Copy</button></li>
+        <li>Shortcuts app → <b>+</b>, name it <b>Send to Blender</b>. In Details turn on <b>Show in Share Sheet</b> and receive <b>Images and Files</b>.</li>
+        <li>Add <b>Get Contents of URL</b>, paste the address. Show More: Method <b>POST</b>, Request Body <b>Form</b>, add a <b>File</b> field, key <b>file</b>, value <b>Shortcut Input</b>.</li>
+        <li>Add <b>Show Notification</b> with <b>Contents of URL</b>.</li>
+      </ol>
+      <div class="dim">Then in Procreate: Actions → Share → <b>PSD</b> → Send to Blender. A PNG works too when its canvas is named SHD_… or TEX_… plus the object's name.</div>
+    </details>
+  </section>
+  <section><h2>Activity</h2><pre id="log">—</pre></section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const t = new URLSearchParams(location.search).get('t') || '';
+const q = '?t=' + encodeURIComponent(t);
+$('url').value = location.origin + '/upload' + q;
+$('copy').onclick = () => { $('url').focus(); $('url').setSelectionRange(0, 9999); document.execCommand('copy'); };
+let last = '';
+async function refresh() {
+  try {
+    const text = await (await fetch('/state' + q, {cache:'no-store'})).text();
+    if (text === last) return;
+    last = text;
+    const s = JSON.parse(text);
+    $('blend').textContent = 'Linked to ' + s.blend + (s.waiting && s.waiting.length ? ' — waiting in Blender: ' + s.waiting.join(', ') : '');
+    $('objects').replaceChildren(...s.objects.map(o => {
+      const row = document.createElement('div'); row.className = 'row';
+      const n = document.createElement('div'); n.className = 'name'; n.textContent = o.name;
+      const m = document.createElement('div'); m.className = 'dim'; m.textContent = o.kinds.join(' · ') || 'no textures yet';
+      n.append(m); row.append(n);
+      if (o.psd) {
+        const a = document.createElement('a'); a.className = 'btn';
+        a.href = '/psd/' + encodeURIComponent(o.name) + '.psd' + q;
+        a.textContent = 'Get PSD (' + Math.round(o.size / 1e6) + ' MB)'; row.append(a);
+      } else {
+        const d = document.createElement('div'); d.className = 'dim'; d.textContent = 'Prepare PSD in Blender'; row.append(d);
+      }
+      return row;
+    }));
+    $('log').textContent = s.log.join('\n') || '—';
+  } catch (e) { last = ''; $('blend').textContent = 'Blender is not reachable. Is the link running?'; }
+}
+refresh(); setInterval(refresh, 2500);
+</script>
+</body>
+</html>
