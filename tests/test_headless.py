@@ -19,11 +19,15 @@ import PinkPunkDelta_internal as addon          # noqa: E402
 addon.register()
 from PinkPunkDelta_internal import identity as idn, links, material     # noqa: E402
 from PinkPunkDelta_internal.modules.bakenlink import bake               # noqa: E402
-from PinkPunkDelta_internal.modules.livelink import core, prepare, psd, qr  # noqa: E402
+from PinkPunkDelta_internal.modules.livelink import core, prepare, psd, qr, watch  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix="ppd_test_")
 core.token = lambda: "testtoken"
 core.PORT = 8799
+drive = os.path.join(tmp, "My Drive", "PPD_Procreate")
+os.makedirs(drive)
+core.watch_folders = lambda blend: [drive]
+bpy.utils.user_resource = lambda *a, **k: tmp        # its record stays in the temp folder
 
 
 def ok(cond, what):
@@ -205,6 +209,32 @@ def run():
     bpy.ops.ppd.inbox_assign(item_id=core.inbox[0]["id"], object_name=low.name)
     ok(not core.inbox and core.find_object("Untitled_Artwork") == low, "and is remembered")
     names(low)
+
+    print("watched folder")
+    ok(watch.drive_root("D:/ggdrive/.shortcut-targets-by-id/x/a.blend") == "D:/ggdrive", "Drive root")
+
+    def wait(cond, sec=40):
+        end = time.time() + sec
+        while time.time() < end and not cond():
+            core.tick()
+            time.sleep(0.05)
+        return cond()
+
+    shd_file = idn.abspath(low.ppd.shd)
+    for name in ("VHC_Test.Wheel.psd", "VHC_Test_Wheel (1).psd"):
+        before = os.path.getmtime(shd_file)
+        with open(os.path.join(drive, name), "wb") as f:
+            f.write(body)
+        ok(wait(lambda: os.path.getmtime(shd_file) != before), name + " is imported")
+        ok(wait(lambda: len(core.watcher.done) > 0 and any(name in k for k in core.watcher.done)), "and noted")
+    with open(os.path.join(drive, "VHC_Test.Nobody.psd"), "wb") as f:
+        f.write(body)
+    ok(wait(lambda: any("Nobody" in x for x in core.log_lines)), "a stranger is left alone")
+    before = os.path.getmtime(shd_file)
+    core.stop()
+    core.start()
+    wait(lambda: False, 10)
+    ok(os.path.getmtime(shd_file) == before and not core.inbox, "nothing is imported twice")
     core.stop()
     qr.encode("http://192.168.178.20:8770/?t=abcdefghijkl")
 

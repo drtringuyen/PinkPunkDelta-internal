@@ -37,6 +37,8 @@ class LinkServer:
         self.jobs = queue.Queue()
         self.state = {"blend": "", "objects": [], "log": []}
         self.psd_files = {}             # full name -> path
+        self.blend = ""                 # for the folder watcher
+        self.names = {}                 # every name an object answers to -> its full name
         self.staging = tempfile.mkdtemp(prefix="ppd_livelink_")
         self.httpd = None
         self.requests = []              # the last uploads, for debugging (no key in it)

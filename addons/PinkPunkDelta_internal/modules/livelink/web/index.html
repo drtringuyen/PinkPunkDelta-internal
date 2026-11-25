@@ -33,22 +33,10 @@
   </section>
   <section>
     <h2>Send back</h2>
-    <div class="dim">In Procreate: Actions → Share → <b>PSD</b> → <b>Save to Files</b>. Then tap <b>Send back</b> beside its object above and pick that PSD. Keep this page open until it says it arrived.</div>
+    <div class="dim">In Procreate: Actions → Share → <b>PSD</b> → <b>Save to Files</b> → Google Drive → My Drive → <b>PPD_Procreate</b>. Blender imports it by itself. Without Drive: save it anywhere, tap <b>Send back</b> beside its object above and pick it.</div>
     <p id="sendmsg"></p>
     <div class="bar" id="bar" hidden><div></div></div>
     <input type="file" id="file" hidden>
-  </section>
-  <section>
-    <details>
-      <summary>One time: the “Send to Blender” Shortcut</summary>
-      <ol>
-        <li>Copy this address: <input id="url" readonly><button id="copy">Copy</button></li>
-        <li>Shortcuts app → <b>+</b>, name it <b>Send to Blender</b>. In Details turn on <b>Show in Share Sheet</b> and receive <b>Images and Files</b>.</li>
-        <li>Add <b>Get Contents of URL</b>, paste the address. Show More: Method <b>POST</b>, Request Body <b>Form</b>, add a <b>File</b> field, key <b>file</b>, value <b>Shortcut Input</b>.</li>
-        <li>Add <b>Show Notification</b> with <b>Contents of URL</b>.</li>
-      </ol>
-      <div class="dim">Then in Procreate: Actions → Share → <b>PSD</b> → Send to Blender. A PNG works too when its canvas is named SHD_… or TEX_… plus the object's name.</div>
-    </details>
   </section>
   <section><h2>Activity</h2><pre id="log">—</pre></section>
 </main>
@@ -56,8 +44,6 @@
 const $ = id => document.getElementById(id);
 const t = new URLSearchParams(location.search).get('t') || '';
 const q = '?t=' + encodeURIComponent(t);
-$('url').value = location.origin + '/upload' + q;
-$('copy').onclick = () => { $('url').focus(); $('url').setSelectionRange(0, 9999); document.execCommand('copy'); };
 let last = '', target = '', sending = false;
 $('file').onchange = () => {
   const f = $('file').files[0];
