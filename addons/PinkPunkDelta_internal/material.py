@@ -1,5 +1,6 @@
-"""MAT_<full name>: four tagged image nodes. Only the tagged nodes' images are ever touched
-after the material was made - its layout is the user's."""
+"""MAT_<full name>: four tagged image nodes and the object's shader group (bands.py). After
+the material was made only the tagged nodes are touched: their images, and their links into the
+shader (linked only while they have an image - an empty image node would show pink)."""
 import os
 
 import bpy
@@ -28,15 +29,15 @@ def group(name):
 
 
 def build(mat, uv):
-    """ALB -> NPR Base, NOR -> NPR Normal. SHD and TEX wait unconnected: the user wires them."""
+    """Image nodes, the shader's group node (its group comes from bands.build) and the output."""
     nt = mat.node_tree
     nt.nodes.clear()
     out = nt.nodes.new("ShaderNodeOutputMaterial")
     out.location = (500, 0)
     npr = nt.nodes.new("ShaderNodeGroup")
-    npr.node_tree = group(NPR)
     npr.name = npr.label = NPR
     npr.location = (200, 0)
+    npr.width = 220
     uvn = nt.nodes.new("ShaderNodeUVMap")
     uvn.name, uvn.uv_map, uvn.location = "PPD_UV", uv, (-500, 0)
     for i, kind in enumerate(idn.KINDS):
@@ -44,9 +45,35 @@ def build(mat, uv):
         n.name, n.label = node_name(kind), kind
         n.location = (-250, 300 - i * 300)
         nt.links.new(uvn.outputs[0], n.inputs[0])
-    nt.links.new(nt.nodes[node_name("ALB")].outputs[0], npr.inputs["Base"])
-    nt.links.new(nt.nodes[node_name("NOR")].outputs[0], npr.inputs["Normal"])
-    nt.links.new(npr.outputs[0], out.inputs["Surface"])
+
+
+def _wire(obj):
+    from . import bands
+    mat = obj.ppd.material
+    npr = bands.npr_node(obj)
+    if mat is None or npr is None or not bands.ours(npr.node_tree):
+        return
+    nt = mat.node_tree
+    if not any(o.links for o in npr.outputs):
+        out = next((n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'), None)
+        if out is not None and not out.inputs["Surface"].links:
+            nt.links.new(npr.outputs[0], out.inputs["Surface"])
+    for kind, (color, alpha) in bands.IMAGE_INPUTS.items():
+        n = nt.nodes.get(node_name(kind))
+        if n is None or n.type != 'TEX_IMAGE':
+            continue
+        want = {(color, "Color")} | ({(alpha, "Alpha")} if alpha else set())
+        has = n.image is not None
+        for link in list(nt.links):
+            if link.from_node == n and link.to_node == npr:
+                if not has or (link.to_socket.name, link.from_socket.name) not in want:
+                    nt.links.remove(link)
+        if not has:
+            continue
+        for to, frm in want:
+            sock = npr.inputs.get(to)
+            if sock is not None and not sock.links:
+                nt.links.new(n.outputs[frm], sock)
 
 
 def show_images(obj):
@@ -63,6 +90,7 @@ def show_images(obj):
     uvn = nodes.get("PPD_UV")       # set up before it was unwrapped
     if uvn is not None and not uvn.uv_map:
         uvn.uv_map = idn.bake_uv(obj)
+    _wire(obj)
 
 
 def ensure(obj):
@@ -72,6 +100,7 @@ def ensure(obj):
         d.material = bpy.data.materials.new("MAT_" + obj.name)
         d.material.use_nodes = True
         build(d.material, idn.bake_uv(obj))
+        d.bands = None
     slots = obj.material_slots
     if not slots:
         obj.data.materials.append(d.material)
@@ -80,6 +109,13 @@ def ensure(obj):
         slots[0].material = d.material
         if old is not None and old.users == 0:
             old.use_fake_user = True        # replaced, never lost
+    from . import bands
+    bands.sync(obj)
+    # only a missing shader is built here (this also runs from the rename timer): an older
+    # one is replaced by Update Shader / Check All Links, which have undo
+    if obj.ppd.bands is None or bands.npr_node(obj) is None or \
+            (bands.ours(obj.ppd.bands) and bands.problems(obj)):
+        bands.build(obj)
     show_images(obj)
     return d.material
 

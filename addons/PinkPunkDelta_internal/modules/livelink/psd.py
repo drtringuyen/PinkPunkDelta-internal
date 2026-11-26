@@ -1,5 +1,6 @@
-"""Layered 8-bit RGB PSD in and out, and a fast PNG writer. Pure numpy - no bpy, so it runs in
-the server's threads. Pixels are top-down uint8 (H, W, 4), straight alpha."""
+"""Layered 8-bit RGB PSD out (reading is modules/unpacking/compose.py), and a fast PNG writer.
+Pure numpy - no bpy, so it runs in the server's threads. Pixels are top-down uint8 (H, W, 4),
+straight alpha."""
 import struct
 import zlib
 
@@ -51,31 +52,34 @@ def pack_channel(ch):
     return counts.tobytes(), b"".join(rows)
 
 
-def unpack_channel(data, counts, h, w):
-    out = np.zeros((h, w), np.uint8)
-    pos = 0
-    for y in range(h):
-        end = pos + int(counts[y])
-        buf = bytearray()
-        i = pos
-        while i < end and len(buf) < w:
-            c = data[i]
-            i += 1
-            if c < 128:
-                buf += data[i:i + c + 1]
-                i += c + 1
-            elif c > 128:
-                buf += bytes((data[i],)) * (257 - c)
-                i += 1
-        pos = end
-        row = np.frombuffer(bytes(buf[:w]), np.uint8)
-        out[y, :len(row)] = row
+# ------------------------------------------------------------------ writing
+def _item(x):
+    if isinstance(x, dict):
+        d = {"opacity": 255, "visible": True, "blend": "norm", "px": None, "children": None}
+        d.update(x)
+        return d
+    name, px, opacity, visible = x
+    return {"name": name, "px": px, "opacity": opacity, "visible": visible, "blend": "norm",
+            "children": None}
+
+
+def _flat(items):
+    """Top-first items (groups have children) as bottom-first layer records."""
+    out = []
+    for it in map(_item, reversed(items)):
+        if it["children"] is not None:
+            out.append({"name": "</Layer group>", "divider": 3, "px": None, "empty": True,
+                        "opacity": 255, "visible": True, "blend": "norm"})
+            out += _flat(it["children"])
+            it = dict(it, divider=1, empty=True)
+        out.append(it)
     return out
 
 
-# ------------------------------------------------------------------ writing
 def write(path, size, layers, composite):
-    """layers: (name, rgba or None = empty, opacity 0-255, visible), TOP layer first.
+    """layers: top first; each (name, rgba or None = empty, opacity 0-255, visible), or a dict
+    with name, px, opacity, visible, blend (PSD key), clip, mask (uint8 h x w) and children
+    (a list: a group).
     composite: rgba shown as the preview."""
     h = w = size
     records, data = [], []
@@ -88,32 +92,52 @@ def write(path, size, layers, composite):
         return blank[v]
 
     packed = {}
-    for name, px, opacity, visible in reversed(layers):     # a PSD stores bottom first
-        if px is None:
+    for it in _flat(layers):
+        name, px = it["name"], it["px"]
+        if it.get("empty"):
+            chans = [None] * 4
+            box = (0, 0, 0, 0)
+        elif px is None:
             chans = [constant(0)] * 4
+            box = (0, 0, h, w)
         else:
             a = px[:, :, 3]
             chans = [constant(int(a[0, 0])) if (a == a[0, 0]).all() else pack_channel(a)]
             chans += [pack_channel(px[:, :, i]) for i in range(3)]
             packed[id(px)] = chans
-        rec = struct.pack(">4iH", 0, 0, h, w, 4)
-        for cid, (counts, body) in zip((-1, 0, 1, 2), chans):
-            rec += struct.pack(">hI", cid, 2 + len(counts) + len(body))
+            box = (0, 0, h, w)
+        ids = [-1, 0, 1, 2]
+        mask = it.get("mask")
+        if mask is not None and not it.get("empty"):
+            ids.append(-2)
+            chans = chans + [pack_channel(mask)]
+        rec = struct.pack(">4iH", *box, len(ids))
+        for cid, ch in zip(ids, chans):
+            rec += struct.pack(">hI", cid, 2 if ch is None else 2 + len(ch[0]) + len(ch[1]))
         uni = name.encode("utf-16-be")
         luni = struct.pack(">I", len(uni) // 2) + uni
         luni += b"\0" * (-len(luni) % 4)
         pas = name.encode("ascii", "replace")[:255]
         pas = bytes((len(pas),)) + pas
         pas += b"\0" * (-len(pas) % 4)
-        extra = struct.pack(">II", 0, 0) + pas
+        mdata = struct.pack(">4iBB2x", 0, 0, h, w, 0, 0) if len(ids) == 5 else b""
+        extra = struct.pack(">I", len(mdata)) + mdata + struct.pack(">I", 0) + pas
         extra += b"8BIMluni" + struct.pack(">I", len(luni)) + luni
-        rec += b"8BIMnorm" + struct.pack(">BBBB", opacity, 0, 0 if visible else 2, 0)
+        blend = it["blend"].encode("latin-1")
+        if it.get("divider"):
+            body = struct.pack(">I", it["divider"])
+            if it["divider"] != 3:
+                body += b"8BIM" + blend
+            extra += b"8BIMlsct" + struct.pack(">I", len(body)) + body
+        flags = (0 if it["visible"] else 2) | (0x18 if it.get("divider") else 0)
+        rec += b"8BIM" + blend + struct.pack(">BBBB", it["opacity"], 1 if it.get("clip") else 0,
+                                             flags, 0)
         rec += struct.pack(">I", len(extra)) + extra
         records.append(rec)
         data.append(chans)
 
     info_len = 2 + sum(map(len, records)) + sum(
-        2 + len(c) + len(b) for chans in data for c, b in chans)
+        2 + (0 if ch is None else len(ch[0]) + len(ch[1])) for chans in data for ch in chans)
     pad = info_len % 2
     info_len += pad
     with open(path, "wb") as f:
@@ -127,8 +151,11 @@ def write(path, size, layers, composite):
         for r in records:
             f.write(r)
         for chans in data:
-            for counts, body in chans:
-                f.write(struct.pack(">H", 1) + counts + body)
+            for ch in chans:
+                if ch is None:
+                    f.write(struct.pack(">H", 0))
+                else:
+                    f.write(struct.pack(">H", 1) + ch[0] + ch[1])
         f.write(b"\0" * pad + struct.pack(">I", 0))                 # no global mask
         comp = packed.get(id(composite))
         comp = comp[1:] if comp else [pack_channel(composite[:, :, i]) for i in range(3)]
@@ -137,151 +164,6 @@ def write(path, size, layers, composite):
             f.write(counts)
         for _c, body in comp:
             f.write(body)
-
-
-# ------------------------------------------------------------------ reading
-class _Reader:
-    def __init__(self, data):
-        self.d, self.p = data, 0
-
-    def take(self, n):
-        if self.p + n > len(self.d):
-            raise ValueError("The PSD is cut off")
-        b = self.d[self.p:self.p + n]
-        self.p += n
-        return bytes(b)
-
-    def get(self, fmt):
-        v = struct.unpack(">" + fmt, self.take(struct.calcsize(">" + fmt)))
-        return v[0] if len(v) == 1 else v
-
-
-def _channel(buf, w, h, depth, big):
-    if not w or not h:
-        return np.zeros((h, w), np.uint8)
-    comp = struct.unpack(">H", buf[:2])[0]
-    body = buf[2:]
-    bpp = depth // 8
-    if comp == 1:
-        cs = 4 if big else 2
-        counts = np.frombuffer(body[:h * cs], '>u4' if big else '>u2')
-        raw = unpack_channel(body[h * cs:], counts, h, w * bpp)
-    else:
-        if comp in (2, 3):
-            body = zlib.decompress(body)
-        raw = np.frombuffer(body[:w * h * bpp], np.uint8).reshape(h, w * bpp)
-        if comp == 3 and bpp == 1:
-            raw = np.cumsum(raw, axis=1, dtype=np.uint8)
-        elif comp == 3:
-            raw = np.cumsum(raw.reshape(h, w, 2).copy().view('>u2')[:, :, 0].astype(np.uint16),
-                            axis=1, dtype=np.uint16)
-            return (raw >> 8).astype(np.uint8)
-    return raw if bpp == 1 else raw[:, ::2]         # the high byte of 16 bit
-
-
-def read_layers(data, names):
-    """{name: rgba} of the layers or groups called one of `names` (any case), the canvas size,
-    and the names of the layers that were not used. A group's layers are merged; hidden layers
-    inside a group are left out; a layer's own opacity counts."""
-    r = _Reader(memoryview(data))
-    if r.take(4) != b"8BPS":
-        raise ValueError("Not a PSD file")
-    ver = r.get("H")
-    big = ver == 2
-    r.take(6)
-    _n, H, W, depth, mode = r.get("HIIHH")
-    if mode != 3 or depth not in (8, 16):
-        raise ValueError("Only 8 or 16 bit RGB PSD files can be read")
-    r.take(r.get("I"))
-    r.take(r.get("I"))
-    L = "Q" if big else "I"
-    total = r.get(L)
-    if not total:
-        raise ValueError("The PSD has no layers")
-    r.get(L)
-    layers = []
-    for _ in range(abs(r.get("h"))):
-        top, left, bottom, right, nch = r.get("4iH")
-        chans = [r.get("h" + L) for _c in range(nch)]
-        r.take(4)
-        r.take(4)
-        opacity, clip, flags, _f = r.get("BBBB")
-        elen = r.get("I")
-        end = r.p + elen
-        r.take(r.get("I"))
-        r.take(r.get("I"))
-        n = r.get("B")
-        name = r.take(n).decode("mac_roman", "replace")
-        r.take(-(n + 1) % 4)
-        kind = 0
-        while r.p + 12 <= end:
-            sig, key = r.take(4), r.take(4)
-            if sig not in (b"8BIM", b"8B64"):
-                break
-            wide = big and key in (b"LMsk", b"Lr16", b"Lr32", b"Layr", b"Mt16", b"Mt32",
-                                   b"Mtrn", b"Alph", b"FMsk", b"lnk2", b"FEid", b"FXid", b"PxSD")
-            ln = r.get("Q" if wide else "I")
-            at = r.p
-            if key == b"luni" and ln >= 4:
-                name = r_unicode(r, ln) or name
-            elif key == b"lsct" and ln >= 4:
-                kind = r.get("I")
-            r.p = min(end, at + ln + (ln % 2))
-        r.p = end
-        layers.append(dict(name=name.strip("\0 "), box=(top, left, bottom, right), chans=chans,
-                           opacity=opacity, visible=not flags & 2, kind=kind))
-    for la in layers:
-        la["at"] = []
-        for cid, ln in la["chans"]:
-            la["at"].append((cid, r.p, ln))
-            r.p += ln
-
-    def pixels(la):
-        out = np.zeros((H, W, 4), np.uint8)
-        t, l, b, ri = la["box"]
-        h, w = max(0, b - t), max(0, ri - l)
-        y0, x0, y1, x1 = max(0, t), max(0, l), min(H, b), min(W, ri)
-        if y1 <= y0 or x1 <= x0:
-            return out
-        out[y0:y1, x0:x1, 3] = 255
-        for cid, at, ln in la["at"]:
-            if cid not in (-1, 0, 1, 2):
-                continue
-            ch = _channel(r.d[at:at + ln], w, h, depth, big)
-            out[y0:y1, x0:x1, 3 if cid == -1 else cid] = ch[y0 - t:y1 - t, x0 - l:x1 - l]
-        if la["opacity"] < 255:
-            out[:, :, 3] = (out[:, :, 3].astype(np.uint16) * la["opacity"] // 255)
-        return out
-
-    wanted = {n.casefold(): n for n in names}
-    found, unused = {}, []
-    stack = []      # open groups, read top-down: the wanted name they belong to
-    for la in reversed(layers):
-        if la["kind"] in (1, 2):
-            parent = stack[-1][0] if stack else None
-            # a hidden SHD / TEX group still counts; a hidden group inside it does not
-            vis = parent is None or (la["visible"] and stack[-1][1])
-            stack.append((parent or wanted.get(la["name"].casefold()), vis))
-            continue
-        if la["kind"] == 3:
-            if stack:
-                stack.pop()
-            continue
-        group = stack[-1][0] if stack else None
-        name = group or wanted.get(la["name"].casefold())
-        if name is None:
-            unused.append(la["name"])
-            continue
-        if group and not (la["visible"] and stack[-1][1]):
-            continue
-        px = pixels(la)
-        found[name] = under(found[name], px) if name in found else px
-    return found, (W, H), unused
-
-
-def r_unicode(r, ln):
-    n = r.get("I")
-    return r.take(min(n * 2, ln - 4)).decode("utf-16-be", "replace")
 
 
 def under(top, low):

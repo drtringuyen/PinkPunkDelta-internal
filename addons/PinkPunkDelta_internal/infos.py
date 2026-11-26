@@ -148,6 +148,39 @@ class PINKPUNKDELTA_INTERNAL_OT_ToggleParts(bpy.types.Operator):
         module_manager.toggle("parts")
         return {'FINISHED'}
 
+class PINKPUNKDELTA_INTERNAL_OT_ToggleUnpacking(bpy.types.Operator):
+    """Toggle Unpacking module on/off"""
+    bl_idname = "pinkpunkdelta_internal.toggle_unpacking"
+    bl_label = "Unpacking"
+
+    def execute(self, context):
+        from . import module_manager
+        module_manager.toggle("unpacking")
+        return {'FINISHED'}
+
+
+class PINKPUNKDELTA_INTERNAL_OT_ToggleQol(bpy.types.Operator):
+    """Toggle Quality of Life module on/off"""
+    bl_idname = "pinkpunkdelta_internal.toggle_qol"
+    bl_label = "Qol"
+
+    def execute(self, context):
+        from . import module_manager
+        module_manager.toggle("qol")
+        return {'FINISHED'}
+
+
+class PINKPUNKDELTA_INTERNAL_OT_TogglePalette(bpy.types.Operator):
+    """Toggle Palette module on/off"""
+    bl_idname = "pinkpunkdelta_internal.toggle_palette"
+    bl_label = "Palette"
+
+    def execute(self, context):
+        from . import module_manager
+        module_manager.toggle("palette")
+        return {'FINISHED'}
+
+
 def register():
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_Build)
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_Reload)
@@ -158,9 +191,15 @@ def register():
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_ToggleBakenlink)
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_ToggleLivelink)
     bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_ToggleParts)
+    bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_ToggleUnpacking)
+    bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_ToggleQol)
+    bpy.utils.register_class(PINKPUNKDELTA_INTERNAL_OT_TogglePalette)
 
 
 def unregister():
+    bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_TogglePalette)
+    bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_ToggleQol)
+    bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_ToggleUnpacking)
     bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_ToggleParts)
     bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_ToggleLivelink)
     bpy.utils.unregister_class(PINKPUNKDELTA_INTERNAL_OT_ToggleBakenlink)

@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 import bpy
-from bpy.props import EnumProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, StringProperty
 
 from ... import identity as idn
 from ... import links, material
@@ -11,6 +11,7 @@ from . import bake
 
 KIND_ITEMS = [(k, k, idn.KIND_LABEL[k]) for k in idn.KINDS]
 busy = ""               # what is baking now, shown by the panel
+progress = [0, 0]       # jobs done, jobs in all
 
 
 class _Texture:
@@ -127,6 +128,14 @@ class PPD_OT_bake(bpy.types.Operator):
     object_name: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})    # empty = every object
     which: EnumProperty(items=[('BOTH', "Both", ""), ('ALB', "ALB", ""), ('NOR', "NOR", "")],
                         default='BOTH', options={'HIDDEN', 'SKIP_SAVE'})
+    send: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})     # then Send to iPad (LiveLink)
+
+    @classmethod
+    def description(cls, context, props):
+        if props.send:
+            return ("Bake ALB and NOR again from the Original (after a new UV or a change), "
+                    "then send the fresh PSD to the iPad. Esc stops")
+        return cls.__doc__
 
     @classmethod
     def poll(cls, context):
@@ -143,6 +152,8 @@ class PPD_OT_bake(bpy.types.Operator):
     def _announce(self, context):
         global busy
         busy = f"Baking {self.jobs[0][1]} of {self.jobs[0][0]}"
+        progress[:] = [self.total - len(self.jobs), self.total]
+        context.window_manager.progress_update(progress[0])
         self.wait = 2           # lets the panel draw it before Blender blocks
         self._redraw(context)
 
@@ -161,7 +172,9 @@ class PPD_OT_bake(bpy.types.Operator):
             self.report({'WARNING'}, "No object is ready to bake")
             return {'CANCELLED'}
         self.total, self.errors, self.stop, self.seconds = len(self.jobs), [], False, 0.0
+        self.failed = set()
         self.timer = context.window_manager.event_timer_add(0.1, window=context.window)
+        context.window_manager.progress_begin(0, len(self.jobs))
         context.window_manager.modal_handler_add(self)
         self._announce(context)
         return {'RUNNING_MODAL'}
@@ -182,6 +195,7 @@ class PPD_OT_bake(bpy.types.Operator):
                     self.seconds += bake.bake_kind(context, o, kind)
             except Exception as e:
                 self.errors.append(str(e).strip())
+                self.failed.add(name)
             if self.jobs:
                 self._announce(context)
                 return {'RUNNING_MODAL'}
@@ -191,16 +205,39 @@ class PPD_OT_bake(bpy.types.Operator):
     def _finish(self, context):
         global busy
         busy = ""
+        progress[:] = [0, 0]
+        context.window_manager.progress_end()
         context.window_manager.event_timer_remove(self.timer)
         for e in self.errors:
             self.report({'ERROR'}, e)
         done = self.total - len(self.jobs) - len(self.errors)
         self.report({'INFO'}, f"{done} of {self.total} baked in {self.seconds:.0f} s")
+        if self.send and not self.stop and not self.jobs:
+            names = {n for n, _k in self._jobs()} - self.failed
+            self._send(names)
         self._redraw(context)
+
+    def _send(self, names):
+        try:
+            from ..livelink import core
+        except ImportError:
+            return
+        for n in sorted(names):
+            o = bpy.data.objects.get(n)
+            try:
+                path = core.send(o)
+                self.report({'INFO'}, f"Sent {os.path.basename(path)}")
+            except (OSError, RuntimeError, MemoryError) as e:
+                self.report({'ERROR'}, f"{n}: not sent: {e or 'out of memory'}")
+        if core.server is not None:
+            core.publish()
 
     def execute(self, context):         # from a script: blocking
         for name, kind in self._jobs():
             bake.bake_kind(context, bpy.data.objects[name], kind)
+        if self.send:
+            self.failed = set()
+            self._send({n for n, _k in self._jobs()})
         return {'FINISHED'}
 
 

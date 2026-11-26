@@ -9,6 +9,22 @@ ICON = {"ALB": 'IMAGE_RGB', "NOR": 'NORMALS_FACE', "SHD": 'SHADING_RENDERED',
         "TEX": 'TEXTURE'}
 
 
+def draw_busy(layout):
+    """While baking: a progress bar, and that Blender is busy (a bake freezes it for a while:
+    clicking then only queues up)."""
+    if not operators.busy:
+        return
+    done, total = operators.progress
+    box = layout.box()
+    box.alert = True
+    text = f"{operators.busy}  ({done + 1} of {total})" if total else operators.busy
+    try:
+        box.progress(factor=done / total if total else 0.0, type='BAR', text=text)
+    except AttributeError:
+        box.label(text=text, icon='RENDER_STILL')
+    box.label(text="Blender is busy: please wait, Esc stops after this one", icon='INFO')
+
+
 def draw_texture(layout, obj, kind):
     """[name: shows it in the UV editor] [path] [load] [folder] [refresh]"""
     img = idn.image(obj, kind)
@@ -52,8 +68,7 @@ class PINKPUNKDELTA_INTERNAL_PT_Bakenlink(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         objs = sorted(idn.objects(), key=lambda o: o.name)
-        if operators.busy:
-            layout.label(text=operators.busy + " - Esc stops", icon='RENDER_STILL')
+        draw_busy(layout)
         if not objs:
             layout.label(text="Set up an object in 01 first", icon='INFO')
             return

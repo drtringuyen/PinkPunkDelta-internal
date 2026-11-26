@@ -37,6 +37,7 @@ class Watcher:
         self.seen = {}          # path -> stamp at the last look: imported once it is still
         self.tries = {}
         self.told = set()
+        self.layer_key = {}     # path+stamp -> the key in its UV layer's name
         self.quit = threading.Event()
         try:
             with open(record, encoding="utf-8") as f:
@@ -82,10 +83,23 @@ class Watcher:
             if still and size:
                 self._import(path, stamp)
 
+    @staticmethod
+    def _uv_key(path):
+        from .server import uv_key
+        try:
+            with open(path, "rb") as f:
+                return uv_key(f.read())
+        except OSError:
+            return ""
+
     def _import(self, path, stamp):
         stem = os.path.splitext(os.path.basename(path))[0]
         name = next((n for n in map(self.find, names_of(stem)) if n), "")
         key = f"{path}{stamp}"
+        if not name and key not in self.layer_key:
+            self.layer_key[key] = self._uv_key(path)    # the canvas was renamed in Procreate
+        if not name and self.layer_key.get(key):
+            name = self.find(stem, self.layer_key[key])
         if not name:            # left alone: another .blend may be waiting for it
             self.tell(key, f"{stem}.psd: no object of that name in this .blend")
             return

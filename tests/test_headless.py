@@ -20,6 +20,8 @@ addon.register()
 from PinkPunkDelta_internal import identity as idn, links, material     # noqa: E402
 from PinkPunkDelta_internal.modules.bakenlink import bake               # noqa: E402
 from PinkPunkDelta_internal.modules.livelink import core, pc, prepare, psd, qr  # noqa: E402
+from PinkPunkDelta_internal.modules.qol import cleanup                  # noqa: E402
+from PinkPunkDelta_internal.modules.unpacking import compose            # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix="ppd_test_")
 core.token = lambda: "testtoken"
@@ -70,8 +72,8 @@ def run():
     nt = low.ppd.material.node_tree
     ok(all(n.bl_idname != "NodeUndefined" for n in nt.nodes["NPR"].node_tree.nodes),
        "NPR has no undefined nodes")
-    ok(nt.nodes["PPD_ALB"].outputs[0].links[0].to_socket.name == "Base", "ALB in Base")
-    ok(not nt.nodes["PPD_SHD"].outputs[0].links, "SHD is left to the user")
+    ok(nt.nodes["NPR"].node_tree.name == "NPR_VHC_Test.Wheel", "its own shader")
+    ok(not nt.nodes["PPD_ALB"].outputs[0].links, "no image yet: not linked (no pink)")
 
     print("bake 8K")
     low.ppd.original, low.ppd.cage = high, 0.1
@@ -79,6 +81,9 @@ def run():
     for k in idn.BAKED:
         print(f"  {k} {bake.bake_kind(bpy.context, low, k):.1f} s")
     names(low)
+    ok({(x.from_socket.name, x.to_socket.name) for x in nt.nodes["PPD_ALB"].outputs[0].links
+        + nt.nodes["PPD_ALB"].outputs[1].links} == {("Color", "ALB"), ("Alpha", "ALB Alpha")},
+       "ALB linked once baked")
     ok(tuple(low.ppd.alb.size) == (8192, 8192), "8K")
     ok(low.ppd.nor.colorspace_settings.name == 'Non-Color', "NOR is Non-Color")
     ok(high.hide_get() and low.modifiers[-1].show_render, "scene is as before")
@@ -119,18 +124,59 @@ def run():
     for o in (dup, inst):
         bpy.data.objects.remove(o)
 
-    print("psd")
+    print("send to iPad")
     t = time.time()
-    path = prepare.prepare(low)
+    path = core.send(low)
     print(f"  {time.time() - t:.1f} s, {os.path.getsize(path) / 1e6:.0f} MB")
+    okey = idn.short_key(low)
+    ok(path == os.path.join(drive, "To iPad", f"VHC_Test.Wheel_k{okey}.psd"), path)
     with open(path, "rb") as f:
         data = f.read()
-    got, size, unused = psd.read_layers(data, ("UV layout", "ALB", "NOR", "SHD"))
-    ok(size == (8192, 8192) and unused == ["TEX"], "layers")
-    ok(got["UV layout"][:, :, 3].any() and got["UV layout"][:, :, 3].max() == 64, "UV 25 %")
+    doc = compose.PSD(data)
+    top = [n.name for n in reversed(doc.roots)]
+    ok(top == [f"UV layout k{okey}", "SHD", "TEX", "ALB", "BASE", "NOR"], f"order {top}")
+    ok(all(n.group for n in doc.roots[:-1]) and not doc.roots[0].visible, "groups; NOR hidden")
+    ok(doc.find("SHD").children[0].blend == "over", "SHD shows as Overlay")
+    staged = []
+
+    def stage(ext):
+        staged.append(os.path.join(tmp, f"st{len(staged)}{ext}"))
+        return staged[-1]
+    found, unused, size = compose.extract(data, ("ALB", "BASE", "SHD"), stage)
+    shd_gray = prepare.pixels(bpy.data.images.load(found["SHD"]["path"]))
+    ok(abs(int(shd_gray[100, 100, 0]) - 128) <= 1 and shd_gray[100, 100, 3] == 255,
+       "SHD starts as 50 % gray: changes nothing")
+    del shd_gray
+    ok(size == (8192, 8192) and
+       sorted(unused) == ["NOR", "TEX"], f"layers {unused}")
     src = prepare.pixels(low.ppd.alb)
-    ok((got["ALB"][:, :, :3] == src[:, :, :3]).all(), "ALB is exact")
-    del got, src, data
+    back = prepare.pixels(bpy.data.images.load(found["ALB"]["path"]))
+    shown = back[:, :, 3] > 0
+    ok((back[shown][:, :3] == src[shown][:, :3]).all(), "ALB is exact on the islands")
+    base_a = prepare.pixels(bpy.data.images.load(found["BASE"]["path"]))[:, :, 3] > 0
+    ok(not (shown & ~prepare.grow(base_a)).any() and shown.sum() >= base_a.sum() * 0.99,
+       "ALB is transparent outside the UV islands (and a few pixels around them)")
+    del base_a, shown
+    base = prepare.pixels(bpy.data.images.load(found["BASE"]["path"]))
+    want = np.round(prepare._srgb(low.ppd.base.mid) * 255)
+    hit = base[base[:, :, 3] > 0]
+    ok(len(hit) > 1e6 and np.abs(hit[:, :3] - want).max() <= 1, f"BASE is Mid, flat {hit[0]}")
+    del src, back, base, hit, data, doc
+    old_name = path
+    low.name = "Rim"
+    links.sync_all()
+    path = core.send(low)
+    ok(not os.path.exists(old_name) and os.path.basename(path).startswith("VHC_Test.Rim_k"),
+       "after a rename the old PSD goes")
+    low.name = "Wheel"
+    links.sync_all()
+    path = core.send(low)
+
+    print("rebake and send")
+    before = os.path.getmtime(path)
+    bpy.ops.ppd.bake(object_name=low.name, send=True)
+    ok(os.path.getmtime(path) > before, "baked, then the PSD is sent again")
+    names(low)
 
     print("pc setup")
     prog = r"C:\Program Files\Blender.exe"
@@ -147,6 +193,30 @@ def run():
                         ("net", {"nets": []})):
         c = {k: o for k, o, _t in pc.evaluate({**good, **change}, r"C:\PPD_Procreate", prog, 8799)[0]}
         ok(not c[key], f"{key} missing is seen")
+    acc = {"name": "ppdipad", "exists": True, "ours": True, "enabled": True, "access": True}
+    c = dict((k, (o, t)) for k, o, t in pc.evaluate({**good, "account": acc},
+                                                    r"C:\PPD_Procreate", prog, 8799)[0])
+    ok(c["account"][0] and "ppdipad" in c["account"][1], "the iPad account is a check")
+    for change, word in (({"exists": False}, "not made"), ({"ours": False}, "did not make"),
+                         ({"enabled": False}, "switched off"), ({"access": False}, "may not")):
+        c = dict((k, (o, t)) for k, o, t in pc.evaluate(
+            {**good, "account": {**acc, **change}}, r"C:\PPD_Procreate", prog, 8799)[0])
+        ok(not c["account"][0] and word in c["account"][1], c["account"][1])
+    ok(pc.NAME_RE.match("ppdipad") and not pc.NAME_RE.match("a b") and
+       not pc.NAME_RE.match("x"), "account names")
+    pw = pc.new_password()
+    ok(len(pw) == 12 and not set(pw) & set("0O1lI"), "a password easy to read back")
+    f = pc.password_file(pw)
+    ok(open(f, encoding="utf-8").read() == pw, "the password file")
+    os.remove(f)
+    s = core.pc_script(pc._ACCOUNT, PWFILE=f)
+    ok("%" not in s.replace("%COMPUTERNAME", "") and "iPad access to PPD_Procreate" in s,
+       "the account script is filled")
+    ok("%" not in core.pc_script(pc._ACCOUNT_REMOVE), "and the remove script")
+    ok(pc.test_login("ppd_nobody_here", "wrong-password") != 0, "a wrong login is told")
+    ok(core.account() == ("ppdipad", ""), "no password until one is set")
+    core.save_config(ipad_user="ppdipad", ipad_password="Secret12345")
+    ok(core.account() == ("ppdipad", "Secret12345") and core.token(), "kept with the token")
     one = dict(good, rules=good["rules"][0], nets=good["nets"][1])
     ok(pc.evaluate(one, r"C:\PPD_Procreate", prog, 8799)[1] == "192.168.1.5", "a single entry")
     ok(pc.quote("a'; calc") == "'a" + "'" * 2 + "; calc'", "quoted as text")
@@ -188,6 +258,10 @@ def run():
     ok(call(url + "/")["code"] == 403, "no token, no entry")
     ok(call(url + "/upload?t=wrong", b"x" * 10)["code"] == 403, "wrong token, no entry")
     ok(b"PPD LiveLink" in call(url + "/?t=testtoken")["body"], "page")
+    import json as _json
+    st = _json.loads(call(url + "/state?t=testtoken")["body"])
+    ok(st["pc"]["user"] == "ppdipad" and st["pc"]["password"] == "Secret12345" and
+       st["pc"]["pcname"], "the page shows the iPad account and the PC's name")
     r = call(url + "/psd/VHC_Test.Wheel.psd?t=testtoken")
     ok(r["body"][:4] == b"8BPS", "PSD download")
 
@@ -200,7 +274,9 @@ def run():
               shd)
     with open(p, "rb") as f:
         body = f.read()
-    ok((psd.read_layers(body, ("SHD",))[0]["SHD"] == shd).all(), "PSD round trip is exact")
+    found, _u, _s = compose.extract(body, ("SHD",), stage)
+    ok((prepare.pixels(bpy.data.images.load(found["SHD"]["path"]), n) == shd).all(),
+       "PSD round trip is exact")
 
     def form(name, data):
         sep = b"----XyZ"
@@ -240,6 +316,27 @@ def run():
     bpy.ops.ppd.inbox_assign(item_id=core.inbox[0]["id"], object_name=low.name)
     ok(not core.inbox and core.find_object("Untitled_Artwork") == low, "and is remembered")
     names(low)
+    r = call(url + f"/upload?t=testtoken", *form(f"Anything_k{okey} (2).psd", body))
+    ok(b"VHC_Test.Wheel: SHD" in r["body"], "the key in the name finds it")
+    r = call(url + "/upload?t=testtoken", *form("Other_k0123ab.psd", body))
+    ok(len(core.inbox) == 1, "a key of another .blend waits")
+    core.drop(core.inbox[0])
+    keyed = os.path.join(tmp, "uv.psd")
+    psd.write(keyed, n, [(f"UV layout k{okey}", shd, 64, True), ("SHD", shd, 255, True)], shd)
+    with open(keyed, "rb") as f:
+        keyed = f.read()
+    r = call(url + "/upload?t=testtoken", *form("Renamed in Procreate.psd", keyed))
+    ok(b"VHC_Test.Wheel: SHD" in r["body"], "or the key in the UV layer's name")
+    grouped = os.path.join(tmp, "g.psd")
+    psd.write(grouped, n, [{"name": "TEX", "opacity": 128, "children": [
+        {"name": "a", "px": shd, "blend": "mul "}, {"name": "b", "px": shd}]},
+        {"name": "ALB", "children": [{"name": "x", "px": shd, "blend": "scrn"}]}], shd)
+    with open(grouped, "rb") as f:
+        r = call(url + "/upload?t=testtoken", *form(f"VHC_Test.Wheel_k{okey}.psd", f.read()))
+    ok(low.ppd.tex_blend == 'MIX' and abs(low.ppd.tex_opacity - 128 / 255) < 1e-6,
+       "TEX: the group's opacity is kept for Blender")
+    ok(low.ppd.alb_blend == 'SCREEN' and b"Screen" in r["body"], "ALB: its one layer's Screen")
+    names(low)
 
     print("watched folder")
 
@@ -258,6 +355,11 @@ def run():
         ok(wait(lambda: os.path.getmtime(shd_file) != before), name + " is imported")
         ok(wait(lambda: len(core.watcher.done) > 0 and any(name in k for k in core.watcher.done)), "and noted")
         ok(wait(lambda: not os.path.exists(os.path.join(drive, name))), "and removed")
+    before = os.path.getmtime(shd_file)
+    with open(os.path.join(drive, "Renamed.psd"), "wb") as f:
+        f.write(keyed)
+    ok(wait(lambda: os.path.getmtime(shd_file) != before), "the UV layer's key, in the folder")
+    ok(os.path.isfile(path), "the outbox is not imported")
     with open(os.path.join(drive, "VHC_Test.Nobody.psd"), "wb") as f:
         f.write(body)
     ok(wait(lambda: any("Nobody" in x for x in core.log_lines)), "a stranger is left alone")
@@ -285,7 +387,6 @@ def run():
     bpy.ops.wm.save_as_mainfile(filepath=second)
     ok(low.name == "VHC_Other.Wheel" and os.path.isfile(old), "Save As copies")
     names(low)
-    ok(os.path.isfile(idn.psd_path(low)), "PSD too")
     bpy.ops.wm.save_mainfile()
     os.remove(second + "1") if os.path.exists(second + "1") else None
     third = os.path.join(tmp, "VHC_Third.blend")
@@ -307,6 +408,26 @@ def run():
     fixed, left = links.check_and_fix()
     ok(not left, f"all corrected {left}")
     names(low)
+
+    print("clean up")
+    texdir = idn.tex_dir()
+    gone = os.path.join(texdir, "ALB_VHC_Third.Gone.png")
+    other = os.path.join(texdir, "ALB_VHC_Else.Gone.png")
+    for f in (gone, other):
+        with open(f, "wb") as fh:
+            fh.write(b"x")
+    found = cleanup.collect()
+    ok(gone in found["unused"] and other not in found["unused"], "only this .blend's files")
+    ok(not any(idn.abspath(idn.image(low, k)) in found["unused"] for k in idn.KINDS
+               if idn.image(low, k)), "used files stay")
+    ok(not any("VHC_Third" not in os.path.basename(f) for f in found["previous"]),
+       "backups of other names stay")
+    os.makedirs(os.path.join(texdir, "_previous"), exist_ok=True)
+    prev = os.path.join(texdir, "_previous", "SHD_VHC_Third.Wheel.png")
+    with open(prev, "wb") as fh:
+        fh.write(b"x")
+    ok(prev in cleanup.collect()["previous"], "previous copies are found")
+    ok(cleanup.recycle([gone]) == 1 and not os.path.exists(gone), "to the Recycle Bin")
 
 
 code = 0

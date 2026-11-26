@@ -8,13 +8,16 @@ import queue
 import re
 import shutil
 import socket
+import struct
 import tempfile
 import threading
 import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import psd
+from ..unpacking import compose
+
+KINDS = ("ALB", "NOR", "TEX", "SHD")
 
 MAX_UPLOAD = 2 * 1024 ** 3
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".psd", ".bmp", ".tga", ".webp"}
@@ -38,6 +41,7 @@ class LinkServer:
         self.state = {"blend": "", "objects": [], "log": []}
         self.psd_files = {}             # full name -> path
         self.names = {}                 # every name an object answers to -> its full name
+        self.keys = {}                  # every object's key -> its full name
         self.staging = tempfile.mkdtemp(prefix="ppd_livelink_")
         self.httpd = None
         self.requests = []              # the last uploads, for debugging (no key in it)
@@ -81,22 +85,23 @@ class LinkServer:
 
     def receive(self, stem, ext, data):
         """One received file, unpacked in this thread so Blender does not freeze on it."""
-        item = {"stem": stem, "psd": ext == ".psd", "files": {}, "note": ""}
+        item = {"stem": stem, "psd": ext == ".psd", "files": {}, "note": "", "blend": {}}
         if ext == ".psd":
-            found, _size, unused = psd.read_layers(data, ("SHD", "TEX"))
-            for kind, px in found.items():
-                if not px[:, :, 3].any():
-                    item["note"] += f" {kind} layer is empty, its file was kept."
+            found, unused, _size = compose.extract(data, KINDS, self.stage)
+            item["key"] = uv_key(data)
+            for kind, f in found.items():
+                if not f["path"]:
+                    item["note"] += f" {kind} is empty, its file was kept."
                     continue
-                item["files"][kind] = self.stage(".png")
-                psd.write_png(item["files"][kind], px)
-            extra = [n for n in unused if n.casefold() not in
-                     ("uv layout", "alb", "nor", "background", "background color")]
-            if extra:
-                item["note"] += " Not used: " + ", ".join(extra[:4]) + \
-                    " (put it in a group named SHD or TEX)."
+                item["files"][kind] = f["path"]
+                if kind in ("ALB", "TEX"):
+                    item["blend"][kind] = (f["blend"], f["opacity"],
+                                           compose.MODE_LABEL.get(f["mode"], f["mode"]))
+            if unused:
+                item["note"] += " Not used: " + ", ".join(unused[:4]) + \
+                    " (put it in the ALB, TEX, SHD or NOR group)."
             if not found:
-                return f"⚠ {stem}: no layer or group named SHD or TEX"
+                return f"⚠ {stem}: no group named ALB, TEX, SHD or NOR"
             if not item["files"]:
                 return f"⚠ {stem}:{item['note']}"
         else:
@@ -110,6 +115,16 @@ class LinkServer:
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False     # a second Blender must not steal the port
+
+
+def uv_key(data):
+    """The object key in a PSD's layer names (the UV layout's), '' when none."""
+    from ... import identity as idn
+    try:
+        names = compose.layer_names(data)
+    except (ValueError, struct.error):
+        return ""
+    return next((k for k in (idn.key_in(n, layer=True) for n in names) if k), "")
 
 
 def split_name(filename):
@@ -212,14 +227,14 @@ class _Handler(BaseHTTPRequestHandler):
     def _psd(self, name):
         path = self.link.psd_files.get(name, "")
         if not os.path.isfile(path):
-            self._send(404, "Press Prepare PSD in Blender first")
+            self._send(404, "Press Send to iPad in Blender first")
             return
         with open(path, "rb") as f:
             self.send_response(200)
             self.send_header("Content-Type", "image/vnd.adobe.photoshop")
             self.send_header("Content-Length", str(os.fstat(f.fileno()).st_size))
             self.send_header("Content-Disposition", "attachment; filename*=UTF-8''"
-                             + urllib.parse.quote(name + ".psd"))
+                             + urllib.parse.quote(os.path.basename(path)))
             self.end_headers()
             shutil.copyfileobj(f, self.wfile, 1 << 20)
 

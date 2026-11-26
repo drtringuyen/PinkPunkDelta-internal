@@ -10,6 +10,9 @@ ALL_MODULES = [    {"name": "setup", "op": "pinkpunkdelta_internal.toggle_setup"
     {"name": "bakenlink", "op": "pinkpunkdelta_internal.toggle_bakenlink", "icon": "RENDER_STILL"},
     {"name": "livelink", "op": "pinkpunkdelta_internal.toggle_livelink", "icon": "URL"},
     {"name": "parts", "op": "pinkpunkdelta_internal.toggle_parts", "icon": "MOD_EDGESPLIT"},
+    {"name": "unpacking", "op": "pinkpunkdelta_internal.toggle_unpacking", "icon": "PACKAGE"},
+    {"name": "qol", "op": "pinkpunkdelta_internal.toggle_qol", "icon": "HEART"},
+    {"name": "palette", "op": "pinkpunkdelta_internal.toggle_palette", "icon": "COLOR"},
 ]
 
 

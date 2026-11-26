@@ -6,6 +6,7 @@ import numpy as np
 from bpy.props import BoolProperty, IntProperty, StringProperty
 
 from ... import bands
+from ... import identity as idn
 
 
 def active(context):
@@ -15,7 +16,7 @@ def active(context):
 
 
 def part_of(obj, pid):
-    return next((p for p in obj.ppd.parts if p.pid == pid), None)
+    return next((p for p in idn.all_parts(obj) if p.pid == pid), None)
 
 
 def layer(obj, create=False):
@@ -89,6 +90,7 @@ class PPD_OT_part_add(bpy.types.Operator):
         pid = max(used | set((counts(obj) or {}).keys()) | {0}) + 1
         p = d.parts.add()
         p.name, p.pid = name, pid
+        bands.copy_bands(d.base, p)        # it starts as the faces around it look
         try:
             bands.build(obj)
         except RuntimeError as e:
@@ -176,7 +178,7 @@ class PPD_OT_part_delete(bpy.types.Operator):
     def execute(self, context):
         obj = active(context)
         p = part_of(obj, self.pid)
-        if p is None:
+        if p is None or not self.pid:
             return {'CANCELLED'}
         if obj.mode == 'EDIT':
             bm, lay = layer(obj)
@@ -201,9 +203,9 @@ class PPD_OT_part_delete(bpy.types.Operator):
 
 
 class PPD_OT_part_copy_ramp(bpy.types.Operator):
-    """Give this part's color ramp to every other part of the object"""
+    """Give this part's colors and borders to every other part of the object"""
     bl_idname = "ppd.part_copy_ramp"
-    bl_label = "Copy Ramp to All Parts"
+    bl_label = "Copy Colors to All Parts"
     bl_options = {'REGISTER', 'UNDO'}
 
     pid: IntProperty(options={'HIDDEN'})
@@ -217,28 +219,107 @@ class PPD_OT_part_copy_ramp(bpy.types.Operator):
 
     def execute(self, context):
         obj = active(context)
-        src = bands.ramp(obj, self.pid)
-        for p in obj.ppd.parts:
-            dst = bands.ramp(obj, p.pid)
-            if src is not None and dst is not None and p.pid != self.pid:
-                bands._copy_ramp(src, dst)
+        src = part_of(obj, self.pid)
+        for p in idn.all_parts(obj):
+            if src is not None and p.pid != self.pid:
+                bands.copy_bands(src, p)
+        return {'FINISHED'}
+
+
+class PPD_OT_part_band(bpy.types.Operator):
+    """Add a shade to this part's light: Shadow, then High"""
+    bl_idname = "ppd.part_band"
+    bl_label = "Add or Remove a Shade"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    pid: IntProperty(options={'HIDDEN'})
+    remove: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    @classmethod
+    def description(cls, context, props):
+        if props.remove:
+            return "Remove a shade from this part's light: High, then Shadow"
+        return cls.__doc__
+
+    @classmethod
+    def poll(cls, context):
+        return active(context) is not None
+
+    def execute(self, context):
+        p = part_of(active(context), self.pid)
+        if p is None:
+            return {'CANCELLED'}
+        n = p.shades + (-1 if self.remove else 1)
+        if not 1 <= n <= 3:
+            self.report({'INFO'}, "1 to 3 shades, and Gloss")
+            return {'CANCELLED'}
+        p.shades = n
+        return {'FINISHED'}
+
+
+class PPD_OT_part_auto(bpy.types.Operator):
+    """Fill this part's ramp from the Concept Palette (Image Editor, PPD): the main color becomes the nearest palette color, Shadow / High / Gloss the palette colors that suit it best. Without a palette they are estimated from the main color"""
+    bl_idname = "ppd.part_auto"
+    bl_label = "Ramp from Palette"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    pid: IntProperty(options={'HIDDEN'})
+
+    @classmethod
+    def poll(cls, context):
+        return active(context) is not None
+
+    def execute(self, context):
+        from . import shades
+        p = part_of(active(context), self.pid)
+        if p is None:
+            return {'CANCELLED'}
+        pal = getattr(context.scene, "ppd_palette", None)
+        palette = [tuple(c.color) for c in pal.colors] if pal is not None else []
+        if p.shades < 3:
+            p.shades = 3
+        if not palette:
+            for key, color in shades.estimate(tuple(p.mid)).items():
+                setattr(p, key, color)
+            self.report({'INFO'}, "No Concept Palette: estimated from the main color")
+            return {'FINISHED'}
+        colors, missing = shades.from_palette(tuple(p.mid), palette)
+        for key in ("mid", "shadow", "high", "gloss"):
+            setattr(p, key, colors[key])
+        if missing:
+            self.report({'WARNING'}, f"No palette color fits {', '.join(missing)}: estimated. "
+                                     "Pick more colors, or drag one onto it")
+        else:
+            self.report({'INFO'}, "All four from the Concept Palette")
+        return {'FINISHED'}
+
+
+class PPD_OT_shader_update(bpy.types.Operator):
+    """Give every set-up object still on the shader of an older version the new one. Its split parts stay; colors set in the bar stay"""
+    bl_idname = "ppd.shader_update"
+    bl_label = "Update Shader"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        done = bands.upgrade_all()
+        self.report({'INFO'}, f"New shader for {len(done)} object(s)" if done
+                    else "Every object has the new shader")
         return {'FINISHED'}
 
 
 class PPD_OT_part_refresh(bpy.types.Operator):
-    """Copy the shared NPR group again into this object's own one (after you changed NPR). The ramps stay"""
+    """Build this object's shader again from its parts and colors"""
     bl_idname = "ppd.part_refresh"
-    bl_label = "Update from NPR"
+    bl_label = "Rebuild Shader"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
-        o = active(context)
-        return o is not None and o.ppd.bands is not None
+        return active(context) is not None
 
     def execute(self, context):
         try:
-            bands.build(active(context), fresh=True)
+            bands.build(active(context))
         except RuntimeError as e:
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
@@ -246,7 +327,7 @@ class PPD_OT_part_refresh(bpy.types.Operator):
 
 
 CLASSES = (PPD_OT_part_add, PPD_OT_part_assign, PPD_OT_part_select, PPD_OT_part_delete,
-           PPD_OT_part_copy_ramp, PPD_OT_part_refresh)
+           PPD_OT_part_copy_ramp, PPD_OT_part_band, PPD_OT_part_auto, PPD_OT_shader_update, PPD_OT_part_refresh)
 
 
 def register():

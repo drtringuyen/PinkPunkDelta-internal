@@ -1,12 +1,14 @@
-"""The Procreate file of an object: <full name>.psd next to its textures, 8K, layers from the top:
-UV layout (25 %), TEX, SHD, ALB, NOR. SHD / TEX hold what is painted so far, else are empty."""
+"""The Procreate file of an object, 8K, named <full name>_k<key>.psd. From the top: UV layout
+(25 %, its name carries the key too), then a group per texture, in the order the shader stacks
+them - SHD (50 % gray, shown Overlay), TEX, ALB, BASE (the parts' Mid, a guide), NOR (hidden). Each group
+holds the texture as it is now; the artist adds layers inside the groups."""
 import os
 
 import bpy
 import numpy as np
 
+from ... import bands
 from ... import identity as idn
-from ... import links
 from . import psd
 
 UV_OPACITY = 64         # 25 %
@@ -70,26 +72,133 @@ def uv_layout(obj, size=idn.SIZE, width=3):
     return out
 
 
-def prepare(obj, size=idn.SIZE):
-    """Writes the PSD; returns its path. A PSD that is already there is kept in _previous."""
+
+
+def _srgb(c):
+    c = np.clip(np.asarray(c, np.float64), 0, 1)
+    return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
+
+
+def _offscreen(size):
+    import gpu
+    try:
+        return gpu.types.GPUOffScreen(size, size, format='RGBA8')
+    except SystemError:             # Blender without a window: start the GPU first
+        gpu.init()
+        return gpu.types.GPUOffScreen(size, size, format='RGBA8')
+
+
+def base_layer(obj, size=idn.SIZE):
+    """BASE: every part flat in its Mid color, drawn over the UV layout. Only a guide in
+    Procreate - Blender colors these parts from the ramps."""
+    import gpu
+    from gpu_extras.batch import batch_for_shader
+    from mathutils import Matrix
+    me = obj.data
+    uv = me.uv_layers.get(idn.bake_uv(obj))
+    if uv is None or not len(me.polygons):
+        return np.zeros((size, size, 4), np.uint8)
+    me.calc_loop_triangles()
+    nt = len(me.loop_triangles)
+    loops = np.empty(nt * 3, np.int32)
+    me.loop_triangles.foreach_get("loops", loops)
+    poly = np.empty(nt, np.int32)
+    me.loop_triangles.foreach_get("polygon_index", poly)
+    co = np.empty(len(me.loops) * 2, np.float32)
+    uv.uv.foreach_get("vector", co)
+    pos = co.reshape(-1, 2)[loops] * 2 - 1
+    pids = np.zeros(len(me.polygons), np.int32)
+    a = me.attributes.get(bands.ATTR)
+    if a is not None and a.domain == 'FACE' and a.data_type == 'INT':
+        a.data.foreach_get("value", pids)
+    lookup = {p.pid: (*_srgb(p.mid), 1.0) for p in idn.all_parts(obj)}
+    colors = np.array([lookup.get(int(v), lookup[0]) for v in pids], np.float32)
+    col = np.repeat(colors[poly], 3, axis=0)
+    off = _offscreen(size)
+    try:
+        shader = gpu.shader.from_builtin('FLAT_COLOR')
+        batch = batch_for_shader(shader, 'TRIS', {"pos": pos.tolist(), "color": col.tolist()})
+        with off.bind():
+            fb = gpu.state.active_framebuffer_get()
+            fb.clear(color=(0.0, 0.0, 0.0, 0.0))
+            with gpu.matrix.push_pop():
+                gpu.matrix.load_identity()
+                gpu.matrix.load_projection_matrix(Matrix.Identity(4))
+                batch.draw(shader)
+            buf = fb.read_color(0, 0, size, size, 4, 0, 'UBYTE')
+        buf.dimensions = size * size * 4
+        out = np.array(buf, np.uint8).reshape(size, size, 4)
+    finally:
+        off.free()
+    return np.ascontiguousarray(out[::-1])
+
+
+ISLAND_GROW = 8         # px kept around the UV islands: sampling at an edge stays clean
+
+
+def grow(mask, px=ISLAND_GROW):
+    """The mask grown by px pixels (a square around each pixel)."""
+    out = mask.copy()
+    for _ in range(px):
+        g = out.copy()
+        g[1:] |= out[:-1]
+        g[:-1] |= out[1:]
+        g[:, 1:] |= out[:, :-1]
+        g[:, :-1] |= out[:, 1:]
+        out = g
+    return out
+
+
+def clear_outside(px, islands):
+    """The baked ALB is opaque everywhere - black outside the UV islands, plus the bake's
+    margin. Outside the islands (grown a little) it becomes transparent: in Procreate only
+    the islands show, and that is what comes back."""
+    px[..., 3] = np.where(islands, px[..., 3], 0)
+    return px
+
+
+def _gray(size):
+    """SHD's neutral start: 50 % gray changes nothing. Overlay shows it while painting."""
+    out = np.empty((size, size, 4), np.uint8)
+    out[..., :3], out[..., 3] = 128, 255
+    return out
+
+
+def stack(obj, size=idn.SIZE):
+    """The layers of the PSD, top first, as Procreate shows them; and its preview."""
     if obj.mode == 'EDIT':
         obj.update_from_editmode()
     px = {}
     for k in idn.KINDS:
         img = idn.image(obj, k)
         px[k] = pixels(img, size) if img and os.path.isfile(idn.abspath(img)) else None
-    white = None
-    if px["ALB"] is None:
-        white = np.full((size, size, 4), 255, np.uint8)
-    layers = [("UV layout", uv_layout(obj, size), UV_OPACITY, True),
-              ("TEX", px["TEX"], 255, True),
-              ("SHD", px["SHD"], 255, True),
-              ("ALB", px["ALB"], 255, True),
-              ("NOR", px["NOR"], 255, True)]
-    path = idn.psd_path(obj)
+    base = base_layer(obj, size)
+    if px["ALB"] is not None and base[..., 3].any():
+        clear_outside(px["ALB"], grow(base[..., 3] > 0))
+
+    def group(name, layer, blend="norm", visible=True):
+        return {"name": name, "visible": visible,
+                "children": [{"name": name, "px": layer, "blend": blend}]}
+
+    layers = [{"name": f"UV layout k{idn.short_key(obj)}", "px": uv_layout(obj, size),
+               "opacity": UV_OPACITY},
+              group("SHD", px["SHD"] if px["SHD"] is not None else _gray(size), "over"),
+              group("TEX", px["TEX"]),
+              group("ALB", px["ALB"]),
+              group("BASE", base),
+              group("NOR", px["NOR"], visible=False)]
+    preview = base
+    for k in ("ALB", "TEX"):
+        if px[k] is not None:
+            preview = psd.under(px[k], preview)
+    return layers, preview
+
+
+def prepare(obj, path, size=idn.SIZE):
+    """Writes the PSD for Procreate to `path`; returns it."""
+    layers, preview = stack(obj, size)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".part"
-    psd.write(tmp, size, layers, px["ALB"] if white is None else white)
-    links.set_aside(path)
+    psd.write(tmp, size, layers, preview)
     os.replace(tmp, path)
     return path

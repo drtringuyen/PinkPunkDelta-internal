@@ -7,7 +7,7 @@ from bpy.props import EnumProperty, StringProperty
 
 from ... import identity as idn
 from ..bakenlink import operators as bake_ops
-from . import core, prepare, qr
+from . import core, qr
 
 _previews = None
 _shown = {"url": "", "key": "", "full": ""}
@@ -93,24 +93,38 @@ class PPD_OT_link_guide(bpy.types.Operator):
 
 
 class PPD_OT_prepare_psd(bpy.types.Operator):
-    """Write the 8K PSD for Procreate next to the textures: UV layout at 25 %, TEX, SHD, ALB, NOR"""
+    """Send the latest UV layout, BASE, ALB, TEX, SHD and NOR as one 8K PSD to the iPad:
+    PPD_Procreate > To iPad (Procreate: Import), also on the LiveLink page"""
     bl_idname = "ppd.prepare_psd"
-    bl_label = "Prepare PSD"
+    bl_label = "Send to iPad"
 
-    object_name: StringProperty(options={'HIDDEN'})
+    object_name: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    @classmethod
+    def description(cls, context, props):
+        if not props.object_name:
+            return "Send every selected set-up object to the iPad, one PSD each"
+        return cls.__doc__
 
     @classmethod
     def poll(cls, context):
         return bool(bpy.data.filepath) and not bake_ops.busy
 
     def execute(self, context):
-        o = bpy.data.objects.get(self.object_name)
-        if o is None:
+        if self.object_name:
+            objs = [bpy.data.objects.get(self.object_name)]
+        else:
+            objs = [o for o in context.selected_objects if o in idn.objects()]
+        objs = [o for o in objs if o is not None]
+        if not objs:
+            self.report({'WARNING'}, "Select a set-up object")
             return {'CANCELLED'}
         if context.window:
             context.window.cursor_set('WAIT')
+        done = []
         try:
-            path = prepare.prepare(o)
+            for o in objs:
+                done.append(core.send(o))
         except (OSError, RuntimeError, MemoryError) as e:
             self.report({'ERROR'}, str(e) or "Out of memory")
             return {'CANCELLED'}
@@ -119,8 +133,8 @@ class PPD_OT_prepare_psd(bpy.types.Operator):
                 context.window.cursor_set('DEFAULT')
         if core.server is not None:
             core.publish()
-        self.report({'INFO'}, f"{os.path.basename(path)}, "
-                              f"{os.path.getsize(path) / 1e6:.0f} MB")
+        self.report({'INFO'}, f"{os.path.basename(done[0])}" if len(done) == 1
+                    else f"{len(done)} PSDs in {core.OUTBOX}")
         return {'FINISHED'}
 
 
@@ -140,7 +154,7 @@ class PPD_OT_inbox_assign(bpy.types.Operator):
 
     item_id: StringProperty(options={'HIDDEN'})
     object_name: EnumProperty(name="Object", items=_object_items)
-    kind: EnumProperty(name="Texture", items=[("SHD", "SHD", ""), ("TEX", "TEX", "")])
+    kind: EnumProperty(name="Texture", items=[(k, k, "") for k in ("ALB", "TEX", "SHD", "NOR")])
 
     def _item(self):
         return next((i for i in core.inbox if i["id"] == self.item_id), None)
@@ -194,8 +208,9 @@ def register():
     global _previews
     _previews = bpy.utils.previews.new()
     bpy.types.WindowManager.ppd_link_host = StringProperty(
-        name="Address", description="Empty: this PC's name. Type its number when the iPad "
-                                    "does not find the name")
+        name="PC Address", description="How the iPad reaches this PC (page, QR code, shared "
+                                       "folder). Empty: this PC's name. Type its number, e.g. "
+                                       "192.168.178.5, only when the iPad does not find the name")
     for c in CLASSES:
         bpy.utils.register_class(c)
 

@@ -1,7 +1,84 @@
 import bpy
 
 from ... import bands
+from ... import identity as idn
 from . import operators as ops
+
+MIN_BLOCK = 0.08        # a narrow band stays wide enough to click
+HANDLE = 0.075          # a border handle's share of the bar
+GLOSS_SHARE = 0.34      # Gloss color + slider beside the bar
+
+
+def spectrum(part):
+    """[(property, width)] Shadow, Mid, High as the borders place them. Gloss is not on this
+    scale (it follows the highlight's strength, not the light's), so it is apart."""
+    b1, b2 = part.border_1, part.border_2
+    if part.shades == 3:
+        return [("shadow", b1), ("mid", b2 - b1), ("high", 1.0 - b2)]
+    if part.shades == 2:
+        return [("shadow", b1), ("mid", 1.0 - b1)]
+    return [("mid", 1.0)]
+
+
+def bar(part, handle=HANDLE):
+    """[(property, width, is a handle)]: the color blocks with a border handle between
+    each two. Widths add up to 1."""
+    blocks = spectrum(part)
+    borders = {"shadow": "border_1", "mid": "border_2"}
+    free = 1.0 - handle * (len(blocks) - 1)
+    widths = [max(w, MIN_BLOCK) for _n, w in blocks]
+    scale = free / sum(widths)
+    out = []
+    for (name, _w), w in zip(blocks, widths):
+        out.append((name, w * scale, False))
+        if name in borders and name != blocks[-1][0]:
+            out.append((borders[name], handle, True))
+    return out
+
+
+def _split_row(layout, items, draw):
+    """items laid out left to right at their widths (they add up to 1)."""
+    cur = layout
+    for i, it in enumerate(items[:-1]):
+        rest = sum(x[1] for x in items[i:])
+        sp = cur.split(factor=min(1.0, it[1] / rest), align=True)
+        draw(sp, it)
+        cur = sp.row(align=True)
+    draw(cur, items[-1])
+
+
+def draw_bands(layout, part, context=None):
+    """[+][-] [Shadow]|[Mid]|[High]   [Gloss][Gloss ====]
+    Click a block for its color, drag a | handle left or right to move that border."""
+    row = layout.row(align=True)
+    row.scale_y = 1.4                   # + and - as tall as the bar
+    sub = row.row(align=True)
+    sub.scale_x = 0.9
+    o = sub.operator("ppd.part_band", text="", icon='ADD')
+    o.pid = part.pid
+    o = sub.operator("ppd.part_band", text="", icon='REMOVE')
+    o.pid, o.remove = part.pid, True
+    sp = row.split(factor=1.0 - GLOSS_SHARE, align=True)
+    strip = sp.row(align=True)
+
+    def draw(where, it):
+        where.prop(part, it[0], text="")
+    _split_row(strip, bar(part), draw)
+    gloss = sp.row(align=True)
+    sw = gloss.row(align=True)
+    sw.ui_units_x = 1.3
+    sw.prop(part, "gloss", text="")
+    gloss.prop(part, "gloss_at", text="Gloss", slider=True)
+
+
+def draw_header(row, part, auto=True):
+    """[main color] name ... : the main color first, then the ramp from the palette."""
+    sw = row.row(align=True)
+    sw.ui_units_x = 1.6
+    sw.prop(part, "mid", text="")
+    row.prop(part, "name", text="") if part.pid else row.label(text="No part")
+    if auto:
+        row.operator("ppd.part_auto", text="", icon='SHADERFX').pid = part.pid
 
 
 class PINKPUNKDELTA_INTERNAL_PT_Parts(bpy.types.Panel):
@@ -21,12 +98,18 @@ class PINKPUNKDELTA_INTERNAL_PT_Parts(bpy.types.Panel):
             return
         d = obj.ppd
         edit = context.mode == 'EDIT_MESH'
-        layout.label(text=obj.name, icon='MESH_DATA')
-        n = ops.counts(obj)
+        if bands.outdated(obj):
+            box = layout.box()
+            box.alert = True
+            box.label(text="This object has the shader of an older version", icon='ERROR')
+            box.operator("ppd.shader_update", icon='FILE_REFRESH')
+        row = layout.row(align=True)
+        row.label(text=obj.name, icon='MESH_DATA')
+        row.operator("ppd.part_refresh", text="", icon='FILE_REFRESH')
         for p in d.parts:
-            header, body = layout.panel(f"PPD_PART_{d.key}_{p.pid}", default_closed=False)
-            row = header.row(align=True)
-            row.prop(p, "name", text="")
+            col = layout.box().column(align=True)
+            row = col.row(align=True)
+            draw_header(row, p)
             sub = row.row(align=True)
             sub.enabled = edit
             o = sub.operator("ppd.part_assign", text="", icon='ADD')
@@ -38,30 +121,18 @@ class PINKPUNKDELTA_INTERNAL_PT_Parts(bpy.types.Panel):
             o = sub.operator("ppd.part_select", text="", icon='RESTRICT_SELECT_ON')
             o.pid, o.deselect = p.pid, True
             row.operator("ppd.part_delete", text="", icon='X').pid = p.pid
-            if body is None:
-                continue
-            col = body.column()
-            r = bands.ramp(obj, p.pid)
-            if r is None:
-                col.alert = True
-                col.label(text="No ramp: Check All Links in 01", icon='ERROR')
-                continue
-            col.template_color_ramp(r, "color_ramp", expand=False)
-            row = col.row(align=True)
-            row.label(text="" if n is None else f"{n.get(p.pid, 0)} faces")
-            row.prop(p, "ignore_alb", toggle=True)
-            if len(d.parts) > 1:
-                row.operator("ppd.part_copy_ramp", text="", icon='COPYDOWN').pid = p.pid
-        row = layout.row(align=True)
-        row.operator("ppd.part_add", icon='ADD')
-        if d.bands is not None:
-            row.operator("ppd.part_refresh", text="", icon='FILE_REFRESH')
-        if len(d.parts) and n is not None:
-            row = layout.row(align=True)
-            row.label(text=f"{n.get(0, 0)} faces in no part: plain NPR")
+            draw_bands(col, p, context)
+
+        col = layout.box().column(align=True)
+        row = col.row(align=True)
+        draw_header(row, d.base)
+        if len(d.parts):
             sub = row.row(align=True)
             sub.enabled = edit
             sub.operator("ppd.part_select", text="", icon='RESTRICT_SELECT_OFF').pid = 0
+        draw_bands(col, d.base, context)
+
+        layout.operator("ppd.part_add", icon='ADD')
         if not edit:
             layout.label(text="Edit Mode: select faces, then Add or +", icon='INFO')
 

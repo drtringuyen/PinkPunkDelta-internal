@@ -330,6 +330,22 @@ def _needs_sync():
     return False
 
 
+def undo_push(message):
+    """A timer changed the file: record it as an undo step. Data changed outside undo leaves
+    Blender's undo history pointing at old data, and Undo / Redo can then crash."""
+    if bpy.app.background:
+        return
+    wm = bpy.context.window_manager
+    win = wm.windows[0] if wm is not None and len(wm.windows) else None
+    if win is None:
+        return
+    try:
+        with bpy.context.temp_override(window=win, screen=win.screen):
+            bpy.ops.ed.undo_push(message=message)
+    except Exception:
+        traceback.print_exc()
+
+
 def _busy():
     wm = bpy.context.window_manager
     return wm is None or any(
@@ -342,7 +358,7 @@ def _tick():
         if _paused or not bpy.data.filepath or central_changed() or _busy():
             return INTERVAL
         if _needs_sync():
-            sync_all()
+            sync_all()      # renames and copies only: it never deletes data
     except Exception:
         traceback.print_exc()
     return INTERVAL
@@ -367,6 +383,19 @@ def _on_save(*_):
 
 
 @persistent
+def _on_depsgraph(scene, depsgraph):
+    """Lights added, removed or hidden: the shaders' light count follows. Only node values
+    change here - nothing is created or deleted."""
+    if _paused or not any(u.id.original.bl_rna.identifier in ("Object", "Light")
+                          for u in depsgraph.updates if u.id is not None):
+        return
+    try:
+        bands.write_lights(scene)
+    except Exception:
+        traceback.print_exc()
+
+
+@persistent
 def _on_load(*_):
     _moved.clear()
     messages.clear()
@@ -375,12 +404,15 @@ def _on_load(*_):
 def register():
     bpy.app.handlers.save_post.append(_on_save)
     bpy.app.handlers.load_post.append(_on_load)
+    bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph)
     bpy.app.timers.register(_tick, first_interval=INTERVAL, persistent=True)
 
 
 def unregister():
-    for h, f in ((bpy.app.handlers.save_post, _on_save), (bpy.app.handlers.load_post, _on_load)):
+    for h, f in ((bpy.app.handlers.save_post, _on_save), (bpy.app.handlers.load_post, _on_load),
+                 (bpy.app.handlers.depsgraph_update_post, _on_depsgraph)):
         if f in h:
             h.remove(f)
     if bpy.app.timers.is_registered(_tick):
         bpy.app.timers.unregister(_tick)
+

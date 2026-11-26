@@ -5,7 +5,11 @@ import bpy
 from ... import identity as idn
 from ... import module_manager
 from ..bakenlink import ui as bake_ui
-from . import core, operators
+from . import core, operators, pc, setup_ui
+
+
+def textures_loaded():
+    return module_manager.is_loaded("bakenlink")
 
 
 class PINKPUNKDELTA_INTERNAL_PT_Livelink(bpy.types.Panel):
@@ -31,7 +35,20 @@ class PINKPUNKDELTA_INTERNAL_PT_Livelink(bpy.types.Panel):
             row.operator("ppd.link_qr", icon='FULLSCREEN_ENTER')
             row.operator("ppd.link_copy", text="Copy", icon='COPYDOWN')
             row.operator("ppd.link_guide", icon='HELP')
-            box.prop(context.window_manager, "ppd_link_host")
+            col = box.column(align=True)
+            col.label(text="Only if the iPad cannot find this PC by name:", icon='INFO')
+            try:
+                col.prop(context.window_manager, "ppd_link_host", text="PC Address",
+                         placeholder=core.pc_name())
+            except TypeError:           # a Blender without placeholders
+                col.prop(context.window_manager, "ppd_link_host", text="PC Address")
+            r = box.row(align=True)
+            r.label(text=core.watch_folder(), icon='FILE_FOLDER')
+            r.operator("ppd.open_share", text="", icon='FOLDER_REDIRECT')
+        if pc.supported():
+            setup_ui.draw_account(layout, context)
+        if textures_loaded():
+            bake_ui.draw_busy(layout)
 
         if core.inbox:
             box = layout.box()
@@ -42,6 +59,8 @@ class PINKPUNKDELTA_INTERNAL_PT_Livelink(bpy.types.Panel):
                 row.operator("ppd.inbox_assign", text="Assign", icon='LINKED').item_id = it["id"]
                 row.operator("ppd.inbox_drop", text="", icon='X').item_id = it["id"]
 
+        row = layout.row()
+        row.operator("ppd.prepare_psd", text="Send Selected to iPad", icon='EXPORT')
         textures = module_manager.is_loaded("bakenlink")
         for o in sorted(idn.objects(), key=lambda o: o.name):
             header, body = layout.panel("PPD_LINK_" + o.ppd.key, default_closed=False)
@@ -56,16 +75,26 @@ class PINKPUNKDELTA_INTERNAL_PT_Livelink(bpy.types.Panel):
                     img = idn.image(o, k)
                     col.label(text=f"{k}  {img.name if img else '(none yet)'}")
             row = col.row(align=True)
-            ready = bool(bpy.data.filepath) and os.path.isfile(idn.psd_path(o))
-            row.operator("ppd.prepare_psd", text="Update PSD" if ready else "Prepare PSD",
-                         icon='FILE_IMAGE').object_name = o.name
+            row.operator("ppd.prepare_psd", icon='EXPORT').object_name = o.name
+            if textures:
+                sub = row.row(align=True)
+                sub.enabled = o.ppd.original is not None
+                op = sub.operator("ppd.bake", text="Rebake & Send", icon='RENDER_STILL')
+                op.object_name, op.send = o.name, True
+            path = core.sent(o)
+            if path:
+                sub = col.row()
+                sub.active = False
+                sub.label(text=f"{core.OUTBOX}/{os.path.basename(path)}", icon='CHECKMARK')
             if o.ppd.canvas:
                 col.label(text=f"Canvas: {o.ppd.canvas}", icon='BRUSH_DATA')
 
-        col = layout.column(align=True)
-        col.scale_y = 0.75
-        for m in list(core.log_lines)[:4]:
-            col.label(text=m)
+        if setup_ui.debug(context):
+            col = layout.box().column(align=True)
+            col.scale_y = 0.75
+            col.label(text="Activity", icon='INFO')
+            for m in list(core.log_lines)[:6]:
+                col.label(text=m)
 
 
 def register():
