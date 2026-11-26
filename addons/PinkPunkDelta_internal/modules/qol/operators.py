@@ -34,7 +34,7 @@ def apply(context, what=None):
     n = 0
     for o in targets(context):
         if bands.outdated(o):
-            bands.build(o)
+            bands.upgrade(o)
         node = bands.npr_node(o)
         if what in (None, "light"):
             _set(node, "Light Color", 1.0 if q.light_color else 0.0)

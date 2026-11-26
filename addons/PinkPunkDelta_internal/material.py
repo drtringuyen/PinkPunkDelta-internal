@@ -25,7 +25,45 @@ def group(name):
         if name not in src.node_groups:
             raise RuntimeError(f"{name} is not in ppd_assets.blend")
         dst.node_groups = [name]
-    return dst.node_groups[0]
+    g = dst.node_groups[0]
+    if name == GN:
+        fix_tubes(g)
+    return g
+
+
+DROP_PART = "PPD_DROP_PART"
+
+
+def tubes_ok(ng):
+    return ng is None or ng.library is not None or ng.nodes.get(DROP_PART) is not None
+
+
+def fix_tubes(ng):
+    """The outline tubes take PPD_PART along from the edges, as a point value. Joined with the
+    mesh, that turns the mesh's face value into a point one too: a part's color then fades into
+    the faces next to it. The tubes drop it before the join. True if the group was changed."""
+    if tubes_ok(ng):
+        return False
+    from .bands import ATTR
+    join = next((n for n in ng.nodes if n.bl_idname == "GeometryNodeJoinGeometry"), None)
+    if join is None:
+        return False
+    drop = ng.nodes.new("GeometryNodeRemoveAttribute")
+    drop.name = drop.label = DROP_PART
+    drop.inputs["Name"].default_value = ATTR
+    drop.location = (join.location.x - 200, join.location.y - 150)
+    for link in [l for l in join.inputs[0].links if l.from_node.type != 'GROUP_INPUT']:
+        frm = link.from_socket
+        ng.links.remove(link)
+        ng.links.new(frm, drop.inputs["Geometry"])
+    ng.links.new(drop.outputs["Geometry"], join.inputs[0])
+    return True
+
+
+def tubes(obj):
+    """obj's GN_SharpTubes group, if it has one."""
+    return next((m.node_group for m in obj.modifiers if m.type == 'NODES' and m.node_group
+                 and m.node_group.name.startswith(GN)), None)
 
 
 def build(mat, uv):
@@ -123,6 +161,7 @@ def ensure(obj):
 def ensure_gn(obj):
     if any(m.type == 'NODES' and m.node_group and m.node_group.name == GN
            for m in obj.modifiers):
+        fix_tubes(tubes(obj))
         return
     mod = obj.modifiers.new(GN, 'NODES')
     mod.node_group = group(GN)

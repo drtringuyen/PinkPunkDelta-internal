@@ -504,11 +504,23 @@ def fix(obj):
 
 
 def outdated(obj):
+    from . import material
     d = obj.ppd
     node = npr_node(obj)
     return d.material is not None and node is not None and (
         not ours(d.bands) or node.node_tree != d.bands or
-        d.bands.nodes.get(TAG + NEWEST) is None)
+        d.bands.nodes.get(TAG + NEWEST) is None or
+        not material.tubes_ok(material.tubes(obj)))
+
+
+def upgrade(obj):
+    """obj onto the newest shader and outline tubes. Only from an operator (undo)."""
+    from . import material
+    material.fix_tubes(material.tubes(obj))
+    d, node = obj.ppd, npr_node(obj)
+    if node is not None and (not ours(d.bands) or node.node_tree != d.bands or
+                             d.bands.nodes.get(TAG + NEWEST) is None):
+        build(obj)
 
 
 def upgrade_all():
@@ -519,7 +531,7 @@ def upgrade_all():
     for o in idn.objects():
         if o.library is None and outdated(o):
             try:
-                build(o)
+                upgrade(o)
                 done.append(o.name)
             except Exception as e:          # never in the way of opening a file
                 print("[PPD] shader upgrade:", o.name, e)

@@ -76,6 +76,18 @@ def run():
     bpy.ops.object.mode_set(mode='OBJECT')
     ok(ops.counts(o)[2] == 23, "counts in Object Mode")
 
+    print("outline tubes")
+    sharp = o.data.attributes.get("sharp_edge") or \
+        o.data.attributes.new("sharp_edge", 'BOOLEAN', 'EDGE')
+    sharp.data.foreach_set("value", [True] * len(o.data.edges))
+    o.data.update()
+    ev = o.evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+    ok(len(ev.polygons) > len(o.data.polygons), "the tubes are there")
+    ok(ev.attributes[bands.ATTR].domain == 'FACE',
+       "the part stays one per face with the tubes (no fading into the next part)")
+    sharp.data.foreach_set("value", [False] * len(o.data.edges))
+    o.data.update()
+
     print("colors and borders")
     door = d.parts[0]
     door.shadow, door.mid, door.high, door.gloss = (0.1, 0, 0), (0.5, 0, 0), (1, 0, 0), (1, 1, 0)
