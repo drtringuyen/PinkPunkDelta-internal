@@ -4,9 +4,11 @@ from ... import bands
 from ... import identity as idn
 from . import operators as ops
 
-MIN_BLOCK = 0.08        # a narrow band stays wide enough to click
+MIN_BLOCK = 0.08        # a narrow band stays wide enough to click (bar width unknown)
 HANDLE = 0.075          # a border handle's share of the bar
 GLOSS_SHARE = 0.34      # Gloss color + slider beside the bar
+MIN_UNITS = 1.0         # narrowest block or handle in UI units: Blender piles narrower ones up
+SIDE_UNITS = 5.0        # panel margins, box padding and the + - beside the bar, in UI units
 
 
 def spectrum(part):
@@ -20,17 +22,31 @@ def spectrum(part):
     return [("mid", 1.0)]
 
 
-def bar(part, handle=HANDLE):
+def bar_units(context):
+    """How many UI units wide the bar is drawn, 0 if unknown."""
+    region = getattr(context, "region", None) if context else None
+    if region is None or region.width <= 0:
+        return 0.0
+    unit = 20.0 * context.preferences.system.ui_scale
+    return max(0.0, region.width / unit - SIDE_UNITS) * (1.0 - GLOSS_SHARE)
+
+
+def bar(part, units=0.0):
     """[(property, width, is a handle)]: the color blocks with a border handle between
-    each two. Widths add up to 1."""
+    each two. Widths add up to 1. With the bar's width in UI units, no block or handle is
+    narrower than MIN_UNITS: Blender lays narrower buttons over each other, so a border
+    dragged far to one side would hide the blocks and handles next to it."""
     blocks = spectrum(part)
     borders = {"shadow": "border_1", "mid": "border_2"}
-    free = 1.0 - handle * (len(blocks) - 1)
-    widths = [max(w, MIN_BLOCK) for _n, w in blocks]
-    scale = free / sum(widths)
+    n = len(blocks)
+    low = MIN_UNITS / units if units > 0 else MIN_BLOCK
+    handle = max(HANDLE, low) if units > 0 else HANDLE
+    if n * low + (n - 1) * handle > 1.0:            # too narrow: all the same width
+        low = handle = 1.0 / (2 * n - 1)
+    spare = 1.0 - (n - 1) * handle - n * low        # shared out as the borders place them
     out = []
-    for (name, _w), w in zip(blocks, widths):
-        out.append((name, w * scale, False))
+    for name, w in blocks:
+        out.append((name, low + spare * max(w, 0.0), False))
         if name in borders and name != blocks[-1][0]:
             out.append((borders[name], handle, True))
     return out
@@ -48,7 +64,7 @@ def _split_row(layout, items, draw):
 
 
 def draw_bands(layout, part, context=None):
-    """[+][-] [Shadow]|[Mid]|[High]   [Gloss][Gloss ====]
+    """[+][-] [Shadow]|[Mid]|[High]   [Gloss ====][Gloss]
     Click a block for its color, drag a | handle left or right to move that border."""
     row = layout.row(align=True)
     row.scale_y = 1.4                   # + and - as tall as the bar
@@ -63,12 +79,12 @@ def draw_bands(layout, part, context=None):
 
     def draw(where, it):
         where.prop(part, it[0], text="")
-    _split_row(strip, bar(part), draw)
+    _split_row(strip, bar(part, bar_units(context)), draw)
     gloss = sp.row(align=True)
-    sw = gloss.row(align=True)
+    gloss.prop(part, "gloss_at", text="Gloss", slider=True)
+    sw = gloss.row(align=True)          # the Gloss color last, at the bright end
     sw.ui_units_x = 1.3
     sw.prop(part, "gloss", text="")
-    gloss.prop(part, "gloss_at", text="Gloss", slider=True)
 
 
 def draw_header(row, part, auto=True):
@@ -107,7 +123,7 @@ class PINKPUNKDELTA_INTERNAL_PT_Parts(bpy.types.Panel):
         row.label(text=obj.name, icon='MESH_DATA')
         row.operator("ppd.part_refresh", text="", icon='FILE_REFRESH')
         for p in d.parts:
-            col = layout.box().column(align=True)
+            col = layout.box().column()   # not aligned: Blender would merge the header and bar rows
             row = col.row(align=True)
             draw_header(row, p)
             sub = row.row(align=True)
@@ -123,7 +139,7 @@ class PINKPUNKDELTA_INTERNAL_PT_Parts(bpy.types.Panel):
             row.operator("ppd.part_delete", text="", icon='X').pid = p.pid
             draw_bands(col, p, context)
 
-        col = layout.box().column(align=True)
+        col = layout.box().column()   # not aligned: Blender would merge the header and bar rows
         row = col.row(align=True)
         draw_header(row, d.base)
         if len(d.parts):

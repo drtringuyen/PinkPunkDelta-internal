@@ -106,6 +106,13 @@ def run():
     items = parts_ui.bar(door)
     ok([n for n, _w, h in items] == ["shadow", "border_1", "mid", "border_2", "high"] and
        abs(sum(w for _n, w, _h in items) - 1) < 1e-6, "handles sit between the blocks")
+    door.border_1, door.border_2 = 0.0, 0.99            # dragged all the way
+    items = parts_ui.bar(door, 8.0)
+    ok(all(w * 8.0 >= parts_ui.MIN_UNITS - 1e-6 for _n, w, _h in items) and
+       abs(sum(w for _n, w, _h in items) - 1) < 1e-6, "no block or handle too narrow to draw")
+    items = parts_ui.bar(door, 3.0)
+    ok(len({round(w, 6) for _n, w, _h in items}) == 1, "a very narrow bar: all the same width")
+    door.border_1, door.border_2 = 0.2, 0.6
     door.shades = 2
     ok([n for n, _w, h in parts_ui.bar(door) if h] == ["border_1"], "2 shades")
     door.shades = 3
